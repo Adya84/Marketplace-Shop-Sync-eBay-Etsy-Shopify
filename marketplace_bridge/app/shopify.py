@@ -209,7 +209,7 @@ class ShopifyClient:
         if quantities:
             data = await self.graphql(INVENTORY_SET, {
                 "idempotencyKey": str(uuid.uuid4()),
-                "input": {"name": "on_hand", "reason": "correction", "ignoreCompareQuantity": True, "quantities": quantities},
+                "input": {"name": "available", "reason": "correction", "quantities": quantities},
             })
             errors = data["inventorySetQuantities"]["userErrors"]
             if errors:
