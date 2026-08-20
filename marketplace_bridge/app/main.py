@@ -37,7 +37,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.2", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.3", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -165,5 +165,9 @@ def render_dashboard(products, jobs, ebay_connected, shopify_connected):
     <form method="post" action="api/settings/shopify"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
     <section class="card"><h2>Products</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="3">Import listings from eBay to begin.</td></tr>'}</tbody></table></section>
     <section class="card"><h2>Activity</h2><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
-    <script>async function send(path){{let r=await fetch(path,{{method:'POST'}});if(!r.ok)alert(await r.text());else{{setTimeout(()=>location.reload(),800)}}}};setTimeout(()=>location.reload(),10000)</script></main></body></html>'''
+    <script>
+    async function send(path){{let r=await fetch(path,{{method:'POST'}});if(!r.ok)alert(await r.text());else{{setTimeout(()=>location.reload(),800)}}}}
+    function formHasData(){{return [...document.querySelectorAll('input')].some(input => input.value.length > 0)}}
+    setTimeout(()=>{{if(!formHasData())location.reload()}},10000)
+    </script></main></body></html>'''
 
