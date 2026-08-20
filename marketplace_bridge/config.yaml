@@ -1,5 +1,5 @@
 name: Shop Sync
-version: "0.0.11"
+version: "0.0.12"
 slug: marketplace_bridge
 description: Transfer complete marketplace listings and keep Shopify as the catalogue master.
 url: https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify
