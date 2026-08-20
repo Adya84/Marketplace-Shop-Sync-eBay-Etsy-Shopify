@@ -20,6 +20,7 @@ from .etsy import EtsyClient
 from .security import SecretBox
 from .settings import settings
 from .shopify import ShopifyClient
+from .tiktok import TikTokShopClient
 
 logging.basicConfig(level=getattr(logging, __import__("os").getenv("BRIDGE_LOG_LEVEL", "INFO").upper(), logging.INFO))
 log = logging.getLogger("marketplace_bridge")
@@ -44,7 +45,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.19", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.20", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -58,6 +59,7 @@ def status():
         "ebay_connected": db.get_credential("ebay") is not None,
         "etsy_connected": db.get_credential("etsy") is not None,
         "shopify_connected": db.get_credential("shopify") is not None,
+        "tiktok_connected": db.get_credential("tiktok") is not None,
         "products": len(db.list_products()),
         "jobs": db.list_jobs(10),
     }
@@ -153,6 +155,24 @@ async def configure_shopify(shop_domain: str = Form(...), client_id: str = Form(
     return {"connected": True, "shop": shop["name"]}
 
 
+@app.post("/api/settings/tiktok")
+async def configure_tiktok(
+    app_key: str = Form(...),
+    app_secret: str = Form(...),
+    access_token: str = Form(...),
+    shop_cipher: str = Form(...),
+):
+    client = TikTokShopClient(app_key, app_secret, access_token, shop_cipher)
+    shop = await client.test()
+    save_credentials("tiktok", {
+        "app_key": app_key.strip(),
+        "app_secret": app_secret.strip(),
+        "access_token": access_token.strip(),
+        "shop_cipher": shop_cipher.strip(),
+    })
+    return {"connected": True, "shop": shop.get("name") or shop.get("id") or shop_cipher}
+
+
 @app.post("/api/import/ebay")
 def import_ebay(background_tasks: BackgroundTasks):
     get_credentials("ebay")
@@ -174,6 +194,14 @@ def import_shopify(background_tasks: BackgroundTasks):
     get_credentials("shopify")
     job_id = db.create_job("shopify_import")
     background_tasks.add_task(run_shopify_import, job_id)
+    return {"job_id": job_id}
+
+
+@app.post("/api/import/tiktok")
+def import_tiktok(background_tasks: BackgroundTasks):
+    get_credentials("tiktok")
+    job_id = db.create_job("tiktok_import")
+    background_tasks.add_task(run_tiktok_import, job_id)
     return {"job_id": job_id}
 
 
@@ -233,6 +261,22 @@ async def run_shopify_import(job_id: int):
         db.update_job(job_id, status="complete", progress=len(products), message=f"Imported {len(products)} Shopify products")
     except Exception as exc:
         log.exception("Shopify import failed")
+        db.update_job(job_id, status="failed", message=str(exc)[:500])
+
+
+async def run_tiktok_import(job_id: int):
+    try:
+        db.update_job(job_id, status="running", message="Reading active TikTok Shop listings")
+        client = TikTokShopClient(**get_credentials("tiktok"))
+        ids = await client.list_active_ids()
+        db.update_job(job_id, total=len(ids), message=f"Found {len(ids)} listings")
+        for index, product_id in enumerate(ids, 1):
+            product = await client.get_product(product_id)
+            db.save_product(product)
+            db.update_job(job_id, progress=index, message=f"Imported {product.title}")
+        db.update_job(job_id, status="complete", progress=len(ids), message=f"Imported {len(ids)} TikTok Shop listings")
+    except Exception as exc:
+        log.exception("TikTok Shop import failed")
         db.update_job(job_id, status="failed", message=str(exc)[:500])
 
 
@@ -304,10 +348,11 @@ def dashboard():
     ebay_connected = db.get_credential("ebay") is not None
     etsy_connected = db.get_credential("etsy") is not None
     shopify_connected = db.get_credential("shopify") is not None
-    return HTMLResponse(render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected))
+    tiktok_connected = db.get_credential("tiktok") is not None
+    return HTMLResponse(render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected, tiktok_connected))
 
 
-def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected):
+def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected, tiktok_connected):
     esc = __import__("html").escape
     pending = [p for p in products if p["source"] != "shopify" and not p["shopify_id"] and (not p["is_duplicate"] or p["duplicate_approved_shopify"])]
     duplicate_review = [p for p in products if p["source"] != "shopify" and not p["shopify_id"] and p["is_duplicate"] and not p["duplicate_approved_shopify"]]
@@ -336,8 +381,10 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     <form method="post" action="api/oauth/etsy/start" onsubmit="startEtsy(event)"><label>API keystring</label><input name="keystring" type="password" required autocomplete="off"><label>Shared secret</label><input name="shared_secret" type="password" required autocomplete="off"><button>Connect Etsy</button></form>
     <form method="post" action="api/oauth/etsy/finish" onsubmit="connect(event)" class="etsy-finish"><label>Authorization result</label><input name="oauth_result" required autocomplete="off" placeholder="Paste the result copied from the Etsy approval page"><button>Finish Etsy connection</button></form><small>Tokens and Shop ID are created automatically. Never paste them into chat or screenshots.</small></section>
     <section class="card"><h2>Shopify</h2><div class="status"><i class="dot {'ok' if shopify_connected else ''}"></i>{'Connected' if shopify_connected else 'Not connected'}</div>
-    <form method="post" action="api/settings/shopify" onsubmit="connect(event)"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
-    <section class="card"><h2>Import catalogues</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button> <button onclick="send('api/import/shopify')" {'disabled' if not shopify_connected else ''}>Import Shopify products</button></section>
+    <form method="post" action="api/settings/shopify" onsubmit="connect(event)"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section>
+    <section class="card"><h2>TikTok Shop</h2><div class="status"><i class="dot {'ok' if tiktok_connected else ''}"></i>{'Connected' if tiktok_connected else 'Not connected'}</div>
+    <form method="post" action="api/settings/tiktok" onsubmit="connect(event)"><label>App key</label><input name="app_key" type="password" required autocomplete="off"><label>App secret</label><input name="app_secret" type="password" required autocomplete="off"><label>Seller access token</label><input name="access_token" type="password" required autocomplete="off"><label>Shop cipher</label><input name="shop_cipher" type="password" required autocomplete="off"><button>Test and save</button></form><small>Use TikTok Shop Partner Center credentials. Never paste them into chat or screenshots.</small></section></div>
+    <section class="card"><h2>Import catalogues</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button> <button onclick="send('api/import/shopify')" {'disabled' if not shopify_connected else ''}>Import Shopify products</button> <button onclick="send('api/import/tiktok')" {'disabled' if not tiktok_connected else ''}>Import TikTok Shop listings</button></section>
     <section class="card"><h2>Review duplicate titles</h2><p>Matching titles are held here and excluded from bulk draft creation until approved for the selected destination.</p><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{duplicate_rows or '<tr><td colspan="3">No duplicate titles need review.</td></tr>'}</tbody></table></section>
     <section class="card"><div class="hero"><h2>Ready to send</h2><div><button onclick="toggleAll()">Select all</button> <button onclick="createSelected()">Create selected drafts</button></div></div><table><thead><tr><th>Select</th><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{pending_rows or '<tr><td colspan="4">No listings waiting to be sent.</td></tr>'}</tbody></table></section>
     <section class="card"><h2>Completed</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Shopify product</th></tr></thead><tbody>{completed_rows or '<tr><td colspan="3">No completed drafts yet.</td></tr>'}</tbody></table></section>
@@ -420,3 +467,4 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     }}
     setInterval(refreshActivity,60000)
     </script></main></body></html>'''
+
