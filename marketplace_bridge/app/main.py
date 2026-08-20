@@ -10,6 +10,7 @@ import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlencode
 
+import httpx
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse
 
@@ -43,7 +44,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.7", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.8", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -110,15 +111,25 @@ async def finish_etsy_oauth(oauth_result: str = Form(...)):
         raise HTTPException(400, "Invalid Etsy authorization result") from exc
     if not token_secrets.compare_digest(str(result.get("state", "")), pending["state"]):
         raise HTTPException(400, "Etsy authorization state did not match")
-    payload = await EtsyClient.exchange_code(
-        pending["keystring"], result.get("code", ""), pending["verifier"], settings.etsy_redirect_uri
-    )
-    expires_at = time.time() + int(payload.get("expires_in", 3600))
-    client = EtsyClient(
-        pending["keystring"], pending["shared_secret"], "pending",
-        payload["access_token"], payload.get("refresh_token", ""), expires_at,
-    )
-    shop = await client.find_authorised_shop()
+    try:
+        payload = await EtsyClient.exchange_code(
+            pending["keystring"], result.get("code", ""), pending["verifier"], settings.etsy_redirect_uri
+        )
+        expires_at = time.time() + int(payload.get("expires_in", 3600))
+        client = EtsyClient(
+            pending["keystring"], pending["shared_secret"], "pending",
+            payload["access_token"], payload.get("refresh_token", ""), expires_at,
+        )
+        shop = await client.find_authorised_shop()
+    except httpx.HTTPStatusError as exc:
+        log.warning("Etsy connection failed with HTTP status %s", exc.response.status_code)
+        raise HTTPException(
+            502,
+            f"Etsy connection failed (HTTP {exc.response.status_code}); select Connect Etsy and try again",
+        ) from exc
+    except (KeyError, RuntimeError, ValueError) as exc:
+        log.warning("Etsy connection failed: %s", exc)
+        raise HTTPException(400, str(exc)) from exc
     client.shop_id = str(shop["shop_id"])
     save_credentials("etsy", client.credential_payload())
     db.delete_credential("etsy_oauth")
@@ -293,4 +304,3 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     function formHasData(){{return [...document.querySelectorAll('input')].some(input => input.value.length > 0)}}
     setTimeout(()=>{{if(!formHasData())location.reload()}},10000)
     </script></main></body></html>'''
-

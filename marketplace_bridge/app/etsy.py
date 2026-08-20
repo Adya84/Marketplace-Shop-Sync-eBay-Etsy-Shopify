@@ -54,10 +54,15 @@ class EtsyClient:
         if not user_id.isdigit():
             raise RuntimeError("Etsy returned an invalid user access token")
         payload = await self._get(f"/v3/application/users/{user_id}/shops")
+        # Etsy's getShopByOwnerUserId endpoint returns a Shop object directly.
+        # Accept the older wrapped response too, so this remains resilient if
+        # Etsy varies the response shape between app access levels.
+        if payload.get("shop_id"):
+            return payload
         shops = payload.get("results", [])
-        if not shops:
-            raise RuntimeError("No Etsy shop is associated with the authorised seller")
-        return shops[0]
+        if shops and shops[0].get("shop_id"):
+            return shops[0]
+        raise RuntimeError("No Etsy shop is associated with the authorised seller")
 
     async def _refresh(self):
         if not self.refresh_token:
@@ -186,4 +191,3 @@ class EtsyClient:
             attributes=attributes,
             source_url=listing.get("url") or f"https://www.etsy.com/listing/{listing_id}",
         )
-

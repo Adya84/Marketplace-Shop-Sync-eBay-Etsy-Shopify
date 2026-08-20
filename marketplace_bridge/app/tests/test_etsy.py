@@ -1,3 +1,5 @@
+import asyncio
+
 from app.etsy import EtsyClient
 
 
@@ -35,3 +37,14 @@ def test_authorised_user_id_comes_from_access_token():
     client = EtsyClient("key", "secret", "pending", "12345678.oauth-token")
     assert client.access_token.split(".", 1)[0] == "12345678"
 
+
+def test_finds_shop_from_direct_etsy_response():
+    class DirectShopClient(EtsyClient):
+        async def _get(self, path: str, params=None):
+            assert path == "/v3/application/users/12345678/shops"
+            return {"shop_id": 987, "shop_name": "My Etsy Shop"}
+
+    client = DirectShopClient("key", "secret", "pending", "12345678.oauth-token")
+    shop = asyncio.run(client.find_authorised_shop())
+
+    assert shop["shop_id"] == 987
