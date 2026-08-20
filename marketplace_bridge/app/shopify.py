@@ -38,7 +38,8 @@ INVENTORY_ACTIVATE = """
 mutation Activate($inventoryItemId: ID!, $locationId: ID!, $idempotencyKey: String!) {
   inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId)
     @idempotent(key: $idempotencyKey) {
-    inventoryLevel { id } userErrors { field message }
+    inventoryLevel { id quantities(names: ["available"]) { name quantity } }
+    userErrors { field message }
   }
 }
 """
@@ -48,6 +49,16 @@ mutation SetInventory($input: InventorySetQuantitiesInput!, $idempotencyKey: Str
   inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
     inventoryAdjustmentGroup { createdAt }
     userErrors { field message code }
+  }
+}
+"""
+
+CURRENT_INVENTORY = """
+query CurrentInventory($inventoryItemId: ID!, $locationId: ID!) {
+  inventoryItem(id: $inventoryItemId) {
+    inventoryLevel(locationId: $locationId) {
+      quantities(names: ["available"]) { name quantity }
+    }
   }
 }
 """
@@ -205,13 +216,22 @@ class ShopifyClient:
                 "locationId": location_id,
                 "idempotencyKey": str(uuid.uuid4()),
             })
+            current_data = await self.graphql(CURRENT_INVENTORY, {
+                "inventoryItemId": inventory_item_id,
+                "locationId": location_id,
+            })
+            level = current_data["inventoryItem"]["inventoryLevel"]
+            if not level:
+                raise RuntimeError("Shopify inventory level was not activated")
+            current_available = next(
+                (quantity["quantity"] for quantity in level["quantities"] if quantity["name"] == "available"),
+                0,
+            )
             quantities.append({
                 "inventoryItemId": inventory_item_id,
                 "locationId": location_id,
                 "quantity": quantities_by_sku.get(variant["sku"], 0),
-                # Shopify requires the CAS field to be explicit. Shop Sync is
-                # setting the imported source quantity, so comparison is skipped.
-                "changeFromQuantity": None,
+                "changeFromQuantity": current_available,
             })
         if quantities:
             data = await self.graphql(INVENTORY_SET, {

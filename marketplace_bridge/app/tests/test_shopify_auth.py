@@ -30,6 +30,7 @@ def test_dashboard_submits_connections_through_ingress_path():
     assert 'action="api/settings/ebay"' in html
     assert 'action="api/oauth/etsy/start"' in html
     assert 'action="api/oauth/etsy/finish"' in html
+    assert "Version 0.0.17" in html
 
 
 def test_product_set_identifier_is_a_separate_mutation_argument():
@@ -51,7 +52,9 @@ def test_inventory_quantities_include_required_compare_field():
     import inspect
 
     source = inspect.getsource(ShopifyClient._set_inventory)
-    assert '"changeFromQuantity": None' in source
+    assert '"changeFromQuantity": current_available' in source
+    assert 'quantity["name"] == "available"' in source
+    assert "CURRENT_INVENTORY" in source
 
 
 def test_dashboard_supports_bulk_draft_selection():

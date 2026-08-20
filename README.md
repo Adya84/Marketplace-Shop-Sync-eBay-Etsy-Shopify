@@ -6,12 +6,12 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.16` implements **eBay UK or Etsy to Shopify**, with Shopify intended to become the catalogue master.
+Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.17` implements **eBay UK or Etsy to Shopify**, with Shopify intended to become the catalogue master.
 
 > [!IMPORTANT]
 > This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation and multi-user onboarding are not implemented yet.
 
-## What version 0.0.16 does
+## What version 0.0.17 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -43,7 +43,7 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The available import routes in `0.0.16` are eBay UK to Shopify and Etsy to Shopify.
+The available import routes in `0.0.17` are eBay UK to Shopify and Etsy to Shopify.
 
 ## Complete setup guide
 
@@ -147,7 +147,7 @@ If Home Assistant still shows the installed and latest versions as identical, re
 
 ## Connect eBay
 
-Version `0.0.16` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
+Version `0.0.17` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
 
 Enter the token on the Shop Sync page and select **Test and save**. The app validates it by requesting the account's active listings before storing it.
 
