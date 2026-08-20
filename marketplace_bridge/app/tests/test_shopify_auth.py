@@ -55,3 +55,18 @@ def test_dashboard_supports_bulk_draft_selection():
     assert 'class="product-select"' in html
     assert "Create selected drafts" in html
     assert "api/products/shopify/bulk" in html
+
+
+def test_dashboard_moves_linked_products_to_completed_section():
+    html = render_dashboard([
+        {"title": "Waiting", "source": "etsy", "source_id": "123", "shopify_id": None},
+        {"title": "Sent", "source": "etsy", "source_id": "456", "shopify_id": "gid://shopify/Product/789"},
+    ], [], False, True, True)
+
+    ready_section, completed_section = html.split('<section class="card"><h2>Completed</h2>', 1)
+    assert "Ready to send" in ready_section
+    assert "Waiting" in ready_section
+    assert "Sent" not in ready_section
+    assert "Sent" in completed_section
+    assert "Completed" in completed_section
+    assert "gid://shopify/Product/789" in completed_section

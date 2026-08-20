@@ -44,7 +44,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.14", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.15", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -270,9 +270,13 @@ def dashboard():
 
 def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected):
     esc = __import__("html").escape
-    product_rows = "".join(f'''<tr><td>{'' if p['shopify_id'] else f'<input class="product-select" type="checkbox" value="{esc(p["source"])}:{esc(p["source_id"])}" aria-label="Select {esc(p["title"])}">'} </td><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
-      <td><span class="pill {'ok' if p['shopify_id'] else ''}">{'Linked' if p['shopify_id'] else 'Imported'}</span></td>
-      <td>{'' if p['shopify_id'] else f'<button onclick="send(\'api/products/{p["source"]}/{p["source_id"]}/shopify\')">Create Shopify draft</button>'}</td></tr>''' for p in products)
+    pending = [product for product in products if not product["shopify_id"]]
+    completed = [product for product in products if product["shopify_id"]]
+    pending_rows = "".join(f'''<tr><td><input class="product-select" type="checkbox" value="{esc(p["source"])}:{esc(p["source_id"])}" aria-label="Select {esc(p["title"])}"></td><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
+      <td><span class="pill">Imported</span></td>
+      <td><button onclick="send('api/products/{p["source"]}/{p["source_id"]}/shopify')">Create Shopify draft</button></td></tr>''' for p in pending)
+    completed_rows = "".join(f'''<tr><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
+      <td><span class="pill ok">Completed</span></td><td><small>{esc(p['shopify_id'])}</small></td></tr>''' for p in completed)
     job_rows = "".join(f"<tr><td>{esc(j['kind'].replace('_',' ').title())}</td><td>{esc(j['status'])}</td><td>{j['progress']}/{j['total']}</td><td>{esc(j['message'])}</td></tr>" for j in jobs)
     return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shop Sync</title>
     <style>
@@ -293,7 +297,8 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     <section class="card"><h2>Shopify</h2><div class="status"><i class="dot {'ok' if shopify_connected else ''}"></i>{'Connected' if shopify_connected else 'Not connected'}</div>
     <form method="post" action="api/settings/shopify" onsubmit="connect(event)"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
     <section class="card"><h2>Import</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button></section>
-    <section class="card"><div class="hero"><h2>Products</h2><div><button onclick="toggleAll()">Select all</button> <button onclick="createSelected()">Create selected drafts</button></div></div><table><thead><tr><th>Select</th><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="4">Connect a marketplace and import listings to begin.</td></tr>'}</tbody></table></section>
+    <section class="card"><div class="hero"><h2>Ready to send</h2><div><button onclick="toggleAll()">Select all</button> <button onclick="createSelected()">Create selected drafts</button></div></div><table><thead><tr><th>Select</th><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{pending_rows or '<tr><td colspan="4">No listings waiting to be sent.</td></tr>'}</tbody></table></section>
+    <section class="card"><h2>Completed</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Shopify product</th></tr></thead><tbody>{completed_rows or '<tr><td colspan="3">No completed drafts yet.</td></tr>'}</tbody></table></section>
     <section class="card"><div class="hero"><h2>Activity</h2><button onclick="clearActivity()">Clear activity</button></div><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
     <footer class="footer">Copyright © 2026 Adrian Apel · All rights reserved · <a href="https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></footer>
     <script>
