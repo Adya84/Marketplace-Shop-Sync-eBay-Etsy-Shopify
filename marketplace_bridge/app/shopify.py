@@ -298,3 +298,4 @@ class ShopifyClient:
             errors = data["inventorySetQuantities"]["userErrors"]
             if errors:
                 raise RuntimeError("; ".join(e["message"] for e in errors))
+
