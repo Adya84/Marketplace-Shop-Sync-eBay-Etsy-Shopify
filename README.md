@@ -1,29 +1,90 @@
-# Shop Sync
+# Shop Sync: eBay, Etsy and Shopify
 
-Shop Sync is a Home Assistant OS add-on that imports complete eBay UK listings into Shopify. Shopify becomes the catalogue and inventory master after a listing is linked.
+Shop Sync is an early-stage Home Assistant OS add-on for transferring marketplace listings. Version `0.0.1` implements the first route: **eBay UK to Shopify**, with Shopify intended to become the catalogue master.
 
-## Current MVP
+> [!IMPORTANT]
+> This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation, Etsy support and multi-user onboarding are not implemented yet.
 
-- Reads active eBay listings created through either eBay's website or APIs.
-- Imports titles, HTML descriptions, all listing and variation images, item specifics, categories, SKUs, prices, variants, and available quantities.
-- Creates Shopify products as drafts using a stable external identifier, avoiding duplicate products on retry.
-- Creates tracked Shopify inventory at the store's first location.
-- Stores source-to-destination mappings, job progress, and encrypted API credentials in persistent add-on storage.
-- Provides a responsive Home Assistant Ingress dashboard.
+## What version 0.0.1 does
 
-## Installation during development
+- Reads active listings from the connected eBay UK seller account.
+- Imports listing titles, HTML descriptions, eBay category details and item specifics.
+- Imports listing photos in source order and maps variation photos where eBay supplies the association.
+- Imports variations, option values, SKUs, prices and available quantities.
+- Creates products as **drafts** in Shopify.
+- Enables tracked inventory and writes quantities to the first Shopify inventory location.
+- Stores eBay-to-Shopify product and variant mappings for later reconciliation.
+- Shows connections, imported products, transfer actions and job activity on a Home Assistant Ingress page called **Shop Sync**.
 
-1. Publish this directory to a GitHub repository.
-2. In Home Assistant, open **Settings â†’ Add-ons â†’ Add-on Store â†’ â‹® â†’ Repositories**.
-3. Add the repository URL and install **Shop Sync**.
-4. Start the add-on and enable **Show in sidebar**.
-5. Enter an eBay production user token and a Shopify Admin API token in the add-on dashboard.
+## Not implemented yet
 
-## Required Shopify access
+- Automatic Shopify-to-eBay stock updates
+- eBay order ingestion or automatic stock deductions
+- Bulk Shopify export/approval
+- Etsy import or export
+- Shopify-to-eBay transfer
+- Scheduled reconciliation, webhooks and automatic retries
+- Guided OAuth onboarding for other sellers
+- A HACS companion integration
 
-The custom app needs access to read/write products, product listings, files, inventory, locations, and fulfilment/order data when order sync is enabled.
+The interface may refer to broader marketplace transfers because those routes are planned, but only eBay UK to Shopify is available in `0.0.1`.
+
+## Install in Home Assistant OS
+
+1. In Home Assistant, open **Settings > Add-ons > Add-on Store**.
+2. Open the three-dot menu and select **Repositories**.
+3. Add this repository URL:
+
+   ```text
+   https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify
+   ```
+
+4. Close the repository dialog and refresh the Add-on Store if necessary.
+5. Select **Shop Sync**, choose **Install**, and wait for the image to build.
+6. Start the add-on and enable **Show in sidebar**.
+7. Open **Shop Sync** from the Home Assistant sidebar.
+
+Shop Sync is distributed as a Home Assistant custom add-on, not through HACS. It needs its own container for background jobs, API connections and persistent storage.
+
+## Connect eBay
+
+Version `0.0.1` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
+
+Enter the token on the Shop Sync page and select **Test and save**. The add-on validates it by requesting the account's active listings before storing it.
+
+Do not paste an eBay client secret into the user-token field. Guided eBay OAuth and automatic token refresh are planned for a later release.
+
+## Connect Shopify
+
+Create and install a Shopify custom app for the destination store, then provide:
+
+- The store domain in the form `your-store.myshopify.com`
+- The app's Admin API access token
+
+The app needs Admin API access to products, inventory and locations. Shop Sync tests the credentials by reading the store identity before saving them. Grant only the permissions needed for the operations you enable.
+
+## Transfer a listing
+
+1. Connect eBay and Shopify.
+2. Select **Import eBay listings** and monitor the Activity table.
+3. Review the imported products in Shop Sync.
+4. Select **Create Shopify draft** for the required listing.
+5. Review the resulting product, photos, variants, price and inventory in Shopify before publishing it.
+
+Shop Sync creates drafts deliberately. A failed photo or inventory operation is recorded as a failed job and should be reviewed before retrying.
+
+## Data and security
+
+- The SQLite database and installation key are stored in the add-on's private persistent configuration directory.
+- Tokens are not returned by the status API or intentionally written to application logs.
+- Stored credentials are authenticated and obfuscated with an installation-specific key. This preview does not claim the protections of a dedicated secrets manager.
+- Uninstalling the add-on may not remove persistent add-on data automatically; inspect Home Assistant's add-on data and backups when retiring an installation.
+
+Never post API tokens in GitHub issues, screenshots or chat messages.
 
 ## Development
+
+The add-on service uses Python, FastAPI, SQLite and the official eBay and Shopify APIs.
 
 ```bash
 cd marketplace_bridge
@@ -32,17 +93,20 @@ BRIDGE_DATA_DIR=./data python -m uvicorn app.main:app --reload --port 8099
 pytest app/tests
 ```
 
+The repository root is a Home Assistant custom add-on repository. The installable add-on is in `marketplace_bridge/`.
+
 ## Roadmap
 
-- Guided eBay OAuth authorization instead of manual token entry.
-- Shopify OAuth for multi-merchant onboarding.
-- Preview and field-validation screen before export.
-- Shopify-to-eBay stock reconciliation and eBay order ingestion.
-- Bulk draft creation, rate limiting, retries, and webhook processing.
-- Etsy connector and any-to-any transfers through the normalized product model.
-- Optional HACS companion integration exposing entities and Home Assistant actions.
+1. Guided eBay OAuth with token refresh
+2. Preview and validation before Shopify export
+3. Bulk draft creation, rate limiting and retries
+4. Shopify-master stock reconciliation and eBay order ingestion
+5. Etsy connector and additional transfer directions
+6. Multi-merchant OAuth, tenant isolation and onboarding
+7. Optional HACS companion exposing Home Assistant entities and actions
 
-## Security
+## Support
 
-Tokens are never written to logs or returned by the API. Stored credentials are authenticated and obfuscated with an installation-specific key in the add-on's private configuration directory. A production multi-user release should use a dedicated secrets manager and per-tenant envelope encryption.
+Use [GitHub Issues](https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify/issues) for reproducible bugs and feature requests. Remove tokens, personal data, order details and customer information from logs before attaching them.
+
 
