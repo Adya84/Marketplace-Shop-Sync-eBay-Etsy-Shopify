@@ -205,7 +205,14 @@ class ShopifyClient:
                 "locationId": location_id,
                 "idempotencyKey": str(uuid.uuid4()),
             })
-            quantities.append({"inventoryItemId": inventory_item_id, "locationId": location_id, "quantity": quantities_by_sku.get(variant["sku"], 0)})
+            quantities.append({
+                "inventoryItemId": inventory_item_id,
+                "locationId": location_id,
+                "quantity": quantities_by_sku.get(variant["sku"], 0),
+                # Shopify requires the CAS field to be explicit. Shop Sync is
+                # setting the imported source quantity, so comparison is skipped.
+                "changeFromQuantity": None,
+            })
         if quantities:
             data = await self.graphql(INVENTORY_SET, {
                 "idempotencyKey": str(uuid.uuid4()),
