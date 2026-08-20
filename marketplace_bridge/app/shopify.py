@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 
 import httpx
 
@@ -34,16 +35,17 @@ mutation AppendVariantMedia($productId: ID!, $variantMedia: [ProductVariantAppen
 """
 
 INVENTORY_ACTIVATE = """
-mutation Activate($inventoryItemId: ID!, $locationId: ID!) {
-  inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
+mutation Activate($inventoryItemId: ID!, $locationId: ID!, $idempotencyKey: String!) {
+  inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId)
+    @idempotent(key: $idempotencyKey) {
     inventoryLevel { id } userErrors { field message }
   }
 }
 """
 
 INVENTORY_SET = """
-mutation SetInventory($input: InventorySetQuantitiesInput!) {
-  inventorySetQuantities(input: $input) {
+mutation SetInventory($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
+  inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
     inventoryAdjustmentGroup { createdAt }
     userErrors { field message code }
   }
@@ -198,10 +200,17 @@ class ShopifyClient:
         quantities_by_sku = {v["sku"]: v["quantity"] for v in source_variants}
         for variant in created_variants:
             inventory_item_id = variant["inventoryItem"]["id"]
-            await self.graphql(INVENTORY_ACTIVATE, {"inventoryItemId": inventory_item_id, "locationId": location_id})
+            await self.graphql(INVENTORY_ACTIVATE, {
+                "inventoryItemId": inventory_item_id,
+                "locationId": location_id,
+                "idempotencyKey": str(uuid.uuid4()),
+            })
             quantities.append({"inventoryItemId": inventory_item_id, "locationId": location_id, "quantity": quantities_by_sku.get(variant["sku"], 0)})
         if quantities:
-            data = await self.graphql(INVENTORY_SET, {"input": {"name": "on_hand", "reason": "correction", "ignoreCompareQuantity": True, "quantities": quantities}})
+            data = await self.graphql(INVENTORY_SET, {
+                "idempotencyKey": str(uuid.uuid4()),
+                "input": {"name": "on_hand", "reason": "correction", "ignoreCompareQuantity": True, "quantities": quantities},
+            })
             errors = data["inventorySetQuantities"]["userErrors"]
             if errors:
                 raise RuntimeError("; ".join(e["message"] for e in errors))

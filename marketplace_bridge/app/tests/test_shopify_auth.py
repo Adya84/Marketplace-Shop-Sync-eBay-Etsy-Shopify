@@ -38,3 +38,10 @@ def test_product_set_identifier_is_a_separate_mutation_argument():
     assert "$identifier: ProductSetIdentifiers" in PRODUCT_SET
     assert "identifier: $identifier" in PRODUCT_SET
     assert '"identifier"' not in PRODUCT_SET
+
+
+def test_inventory_mutations_include_required_idempotency_directive():
+    from app.shopify import INVENTORY_ACTIVATE, INVENTORY_SET
+
+    assert "@idempotent(key: $idempotencyKey)" in INVENTORY_ACTIVATE
+    assert "@idempotent(key: $idempotencyKey)" in INVENTORY_SET
