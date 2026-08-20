@@ -83,3 +83,4 @@ def test_dashboard_moves_linked_products_to_completed_section():
     assert "Sent" in completed_section
     assert "Completed" in completed_section
     assert "gid://shopify/Product/789" in completed_section
+
