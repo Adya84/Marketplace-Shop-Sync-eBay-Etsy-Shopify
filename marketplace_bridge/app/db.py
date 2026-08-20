@@ -52,6 +52,13 @@ CREATE TABLE IF NOT EXISTS duplicate_approvals (
   approved_at TEXT NOT NULL,
   PRIMARY KEY(source, source_id, destination)
 );
+CREATE TABLE IF NOT EXISTS completed_dismissals (
+  source TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  destination TEXT NOT NULL,
+  dismissed_at TEXT NOT NULL,
+  PRIMARY KEY(source, source_id, destination)
+);
 """
 
 
@@ -108,8 +115,12 @@ class Database:
         with self.connect() as conn:
             products = [dict(row) for row in conn.execute(
                 """SELECT p.id,p.source,p.source_id,p.title,p.updated_at,
-                m.destination_id AS shopify_id FROM products p LEFT JOIN mappings m
+                m.destination_id AS shopify_id,
+                CASE WHEN d.source IS NULL THEN 0 ELSE 1 END AS completed_hidden
+                FROM products p LEFT JOIN mappings m
                 ON m.source=p.source AND m.source_id=p.source_id AND m.destination='shopify'
+                LEFT JOIN completed_dismissals d
+                ON d.source=p.source AND d.source_id=p.source_id AND d.destination='shopify'
                 ORDER BY p.updated_at DESC"""
             )]
             approvals = {
@@ -151,6 +162,18 @@ class Database:
                 """INSERT INTO mappings VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(source,source_id,destination)
                 DO UPDATE SET destination_id=excluded.destination_id,payload=excluded.payload,updated_at=excluded.updated_at""",
                 (source, source_id, destination, destination_id, json.dumps(payload), now()),
+            )
+            conn.execute(
+                "DELETE FROM completed_dismissals WHERE source=? AND source_id=? AND destination=?",
+                (source, source_id, destination),
+            )
+
+    def clear_completed(self, destination: str = "shopify"):
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO completed_dismissals(source,source_id,destination,dismissed_at)
+                SELECT source,source_id,destination,? FROM mappings WHERE destination=?""",
+                (now(), destination),
             )
 
     def create_job(self, kind: str) -> int:
