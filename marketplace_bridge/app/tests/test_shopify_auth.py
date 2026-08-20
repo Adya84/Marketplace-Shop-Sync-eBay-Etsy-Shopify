@@ -45,3 +45,13 @@ def test_inventory_mutations_include_required_idempotency_directive():
 
     assert "@idempotent(key: $idempotencyKey)" in INVENTORY_ACTIVATE
     assert "@idempotent(key: $idempotencyKey)" in INVENTORY_SET
+
+
+def test_dashboard_supports_bulk_draft_selection():
+    html = render_dashboard([
+        {"title": "Etsy item", "source": "etsy", "source_id": "123", "shopify_id": None},
+    ], [], False, True, True)
+
+    assert 'class="product-select"' in html
+    assert "Create selected drafts" in html
+    assert "api/products/shopify/bulk" in html

@@ -29,6 +29,7 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Guides Etsy sign-in with PKCE, validates single-use state and discovers the authorised Shop ID automatically.
 - Provides an optional **Buy me a beer** button linked directly to the Graffidoodle PayPal page.
 - Displays an Adrian Apel copyright notice and links to the Shop Sync licence.
+- Allows multiple imported products to be selected and queued as Shopify drafts together.
 
 ## Not implemented yet
 
@@ -116,8 +117,8 @@ Etsy should now show green **Connected**. The authorization result and Etsy code
 
 ### 5. Create and verify a Shopify draft
 
-1. Start with one simple imported listing.
-2. Select **Create Shopify draft** beside it.
+1. Start with one simple imported listing and select **Create Shopify draft** beside it.
+2. After verifying the first draft, tick any additional products you want, or use **Select all**, then select **Create selected drafts**.
 3. Wait for the Shopify export job to complete.
 4. In Shopify Admin, open **Products** and inspect the new draft.
 5. Check its title, description, full-size images and image order, variations, variation images where Etsy supplied associations, SKUs, prices and stock quantities.
