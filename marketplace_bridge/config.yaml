@@ -1,0 +1,35 @@
+name: Shop Sync
+version: "0.0.1"
+slug: marketplace_bridge
+description: Transfer complete marketplace listings and keep Shopify as the catalogue master.
+url: https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify
+arch:
+  - amd64
+  - aarch64
+  - armv7
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:store-sync
+panel_title: Shop Sync
+homeassistant_api: true
+auth_api: true
+map:
+  - addon_config:rw
+options:
+  log_level: info
+  ebay_marketplace: EBAY_GB
+  ebay_environment: production
+  shopify_api_version: "2026-07"
+schema:
+  log_level: list(trace|debug|info|warning|error)
+  ebay_marketplace: str
+  ebay_environment: list(sandbox|production)
+  shopify_api_version: str
+ports:
+  8099/tcp: null
+ports_description:
+  8099/tcp: Direct web interface (Ingress is recommended)
+

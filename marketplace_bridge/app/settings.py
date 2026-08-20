@@ -1,0 +1,23 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class Settings:
+    data_dir: Path = Path(os.getenv("BRIDGE_DATA_DIR", "./data"))
+    ebay_marketplace: str = os.getenv("EBAY_MARKETPLACE", "EBAY_GB")
+    ebay_environment: str = os.getenv("EBAY_ENVIRONMENT", "production")
+    shopify_api_version: str = os.getenv("SHOPIFY_API_VERSION", "2026-07")
+
+    @property
+    def database_path(self) -> Path:
+        return self.data_dir / "marketplace_bridge.db"
+
+
+settings = Settings()
+settings.data_dir.mkdir(parents=True, exist_ok=True)
+
+

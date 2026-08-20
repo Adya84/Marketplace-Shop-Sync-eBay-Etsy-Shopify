@@ -1,0 +1,11 @@
+configuration:
+  log_level:
+    name: Log level
+  ebay_marketplace:
+    name: eBay marketplace
+  ebay_environment:
+    name: eBay environment
+  shopify_api_version:
+    name: Shopify API version
+
+

@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+from .db import Database
+from .ebay import EbayClient
+from .security import SecretBox
+from .settings import settings
+from .shopify import ShopifyClient
+
+logging.basicConfig(level=getattr(logging, __import__("os").getenv("BRIDGE_LOG_LEVEL", "INFO").upper(), logging.INFO))
+log = logging.getLogger("marketplace_bridge")
+db = Database(settings.database_path)
+secrets = SecretBox.from_file(settings.data_dir / ".credential_key")
+
+
+def get_credentials(provider: str) -> dict:
+    encrypted = db.get_credential(provider)
+    if not encrypted:
+        raise HTTPException(400, f"{provider.title()} is not connected")
+    return json.loads(secrets.decrypt(encrypted))
+
+
+def save_credentials(provider: str, payload: dict):
+    db.put_credential(provider, secrets.encrypt(json.dumps(payload)))
+
+
+@asynccontextmanager
+async def lifespan(app):
+    log.info("Shop Sync ready; database=%s", settings.database_path)
+    yield
+
+
+app = FastAPI(title="Shop Sync", version="0.0.1", lifespan=lifespan)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": app.version}
+
+
+@app.get("/api/status")
+def status():
+    return {
+        "ebay_connected": db.get_credential("ebay") is not None,
+        "shopify_connected": db.get_credential("shopify") is not None,
+        "products": len(db.list_products()),
+        "jobs": db.list_jobs(10),
+    }
+
+
+@app.post("/api/settings/ebay")
+async def configure_ebay(access_token: str = Form(...)):
+    client = EbayClient(access_token, settings.ebay_environment)
+    await client.list_active_ids()  # Validates token before storage.
+    save_credentials("ebay", {"access_token": access_token})
+    return RedirectResponse("./", status_code=303)
+
+
+@app.post("/api/settings/shopify")
+async def configure_shopify(shop_domain: str = Form(...), access_token: str = Form(...)):
+    client = ShopifyClient(shop_domain, access_token, settings.shopify_api_version)
+    shop = await client.test()
+    save_credentials("shopify", {"shop_domain": shop["myshopifyDomain"], "access_token": access_token})
+    return RedirectResponse("./", status_code=303)
+
+
+@app.post("/api/import/ebay")
+def import_ebay(background_tasks: BackgroundTasks):
+    get_credentials("ebay")
+    job_id = db.create_job("ebay_import")
+    background_tasks.add_task(run_ebay_import, job_id)
+    return {"job_id": job_id}
+
+
+async def run_ebay_import(job_id: int):
+    try:
+        db.update_job(job_id, status="running", message="Reading active eBay listings")
+        credential = get_credentials("ebay")
+        client = EbayClient(credential["access_token"], settings.ebay_environment)
+        ids = await client.list_active_ids()
+        db.update_job(job_id, total=len(ids), message=f"Found {len(ids)} listings")
+        for index, item_id in enumerate(ids, 1):
+            product = await client.get_product(item_id)
+            db.save_product(product)
+            db.update_job(job_id, progress=index, message=f"Imported {product.title}")
+        db.update_job(job_id, status="complete", message=f"Imported {len(ids)} listings")
+    except Exception as exc:
+        log.exception("eBay import failed")
+        db.update_job(job_id, status="failed", message=str(exc)[:500])
+
+
+@app.post("/api/products/{source}/{source_id}/shopify")
+def export_shopify(source: str, source_id: str, background_tasks: BackgroundTasks):
+    get_credentials("shopify")
+    if not db.get_product(source, source_id):
+        raise HTTPException(404, "Product not found")
+    job_id = db.create_job("shopify_export")
+    background_tasks.add_task(run_shopify_export, job_id, source, source_id)
+    return {"job_id": job_id}
+
+
+async def run_shopify_export(job_id: int, source: str, source_id: str):
+    try:
+        db.update_job(job_id, status="running", total=1, message="Creating Shopify draft")
+        product = db.get_product(source, source_id)
+        credential = get_credentials("shopify")
+        client = ShopifyClient(credential["shop_domain"], credential["access_token"], settings.shopify_api_version)
+        created = await client.create_draft(product)
+        db.save_mapping(source, source_id, "shopify", created["id"], {"variants": created["variants"]["nodes"]})
+        db.update_job(job_id, status="complete", progress=1, message=f"Created Shopify draft: {created['title']}")
+    except Exception as exc:
+        log.exception("Shopify export failed")
+        db.update_job(job_id, status="failed", message=str(exc)[:500])
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard():
+    products = db.list_products()
+    jobs = db.list_jobs()
+    ebay_connected = db.get_credential("ebay") is not None
+    shopify_connected = db.get_credential("shopify") is not None
+    return HTMLResponse(render_dashboard(products, jobs, ebay_connected, shopify_connected))
+
+
+def render_dashboard(products, jobs, ebay_connected, shopify_connected):
+    esc = __import__("html").escape
+    product_rows = "".join(f'''<tr><td>{esc(p['title'])}<small>eBay {esc(p['source_id'])}</small></td>
+      <td><span class="pill {'ok' if p['shopify_id'] else ''}">{'Linked' if p['shopify_id'] else 'Imported'}</span></td>
+      <td>{'' if p['shopify_id'] else f'<button onclick="send(\'api/products/ebay/{p["source_id"]}/shopify\')">Create Shopify draft</button>'}</td></tr>''' for p in products)
+    job_rows = "".join(f"<tr><td>{esc(j['kind'].replace('_',' ').title())}</td><td>{esc(j['status'])}</td><td>{j['progress']}/{j['total']}</td><td>{esc(j['message'])}</td></tr>" for j in jobs)
+    return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shop Sync</title>
+    <style>
+    :root{{--bg:#0b1220;--card:#121d2e;--line:#26364d;--text:#ecf4ff;--muted:#91a4bd;--blue:#36a3ff;--green:#29d391}}
+    *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}}main{{max-width:1100px;margin:auto;padding:28px}}
+    h1{{font-size:28px;margin:0}}h2{{font-size:18px;margin:0 0 16px}}p,small{{color:var(--muted)}}.hero{{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}}
+    .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}}.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}}
+    input{{width:100%;background:#09111e;color:var(--text);border:1px solid var(--line);padding:11px;border-radius:8px;margin:6px 0 12px}}button{{background:var(--blue);border:0;color:#04111e;font-weight:700;border-radius:8px;padding:10px 14px;cursor:pointer}}
+    .status{{display:flex;gap:8px;align-items:center}}.dot{{width:10px;height:10px;background:#e85d75;border-radius:50%}}.dot.ok{{background:var(--green)}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px;border-top:1px solid var(--line)}}small{{display:block;margin-top:3px}}.pill{{background:#2d3b50;padding:4px 8px;border-radius:99px;font-size:12px}}.pill.ok{{background:#145c47;color:#9effd8}}
+    @media(max-width:650px){{main{{padding:16px}}.hero{{display:block}}table{{display:block;overflow:auto}}}}
+    </style></head><body><main><div class="hero"><div><h1>Shop Sync</h1><p>Move complete listings between your marketplaces</p></div><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button></div>
+    <div class="grid"><section class="card"><h2>eBay UK</h2><div class="status"><i class="dot {'ok' if ebay_connected else ''}"></i>{'Connected' if ebay_connected else 'Not connected'}</div>
+    <form method="post" action="api/settings/ebay"><label>Production user access token</label><input name="access_token" type="password" required autocomplete="off"><button>Test and save</button></form></section>
+    <section class="card"><h2>Shopify</h2><div class="status"><i class="dot {'ok' if shopify_connected else ''}"></i>{'Connected' if shopify_connected else 'Not connected'}</div>
+    <form method="post" action="api/settings/shopify"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Admin API token</label><input name="access_token" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
+    <section class="card"><h2>Products</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="3">Import listings from eBay to begin.</td></tr>'}</tbody></table></section>
+    <section class="card"><h2>Activity</h2><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
+    <script>async function send(path){{let r=await fetch(path,{{method:'POST'}});if(!r.ok)alert(await r.text());else{{setTimeout(()=>location.reload(),800)}}}};setTimeout(()=>location.reload(),10000)</script></main></body></html>'''
+
