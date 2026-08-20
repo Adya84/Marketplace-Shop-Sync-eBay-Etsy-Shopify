@@ -30,3 +30,11 @@ def test_dashboard_submits_connections_through_ingress_path():
     assert 'action="api/settings/ebay"' in html
     assert 'action="api/oauth/etsy/start"' in html
     assert 'action="api/oauth/etsy/finish"' in html
+
+
+def test_product_set_identifier_is_a_separate_mutation_argument():
+    from app.shopify import PRODUCT_SET
+
+    assert "$identifier: ProductSetIdentifiers" in PRODUCT_SET
+    assert "identifier: $identifier" in PRODUCT_SET
+    assert '"identifier"' not in PRODUCT_SET
