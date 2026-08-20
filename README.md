@@ -6,12 +6,12 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.20` implements **eBay UK, Etsy or TikTok Shop to Shopify**, imports the Shopify master catalogue, and adds destination-specific duplicate-title review.
+Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.21` implements **eBay UK, Etsy or TikTok Shop to Shopify**, imports the Shopify master catalogue, and adds destination-specific duplicate-title review.
 
 > [!IMPORTANT]
 > This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation and multi-user onboarding are not implemented yet.
 
-## What version 0.0.20 does
+## What version 0.0.21 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -26,6 +26,7 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Submits connections and actions through the correct Home Assistant Ingress path.
 - Imports active Etsy listings through Open API v3, including descriptions, images, variations, SKUs, prices and quantities.
 - Imports active TikTok Shop listings, including descriptions, images, variations, SKUs, prices and quantities.
+- Supplies a complete Shopify product-option matrix for simple and multi-option variants, including Shopify's required default option for products without named variations.
 - Renews Etsy OAuth access tokens automatically when a refresh token is available.
 - Guides Etsy sign-in with PKCE, validates single-use state and discovers the authorised Shop ID automatically.
 - Provides an optional **Buy me a beer** button linked directly to the Graffidoodle PayPal page.
@@ -48,7 +49,7 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The available draft creation routes in `0.0.20` are eBay UK, Etsy and TikTok Shop to Shopify. Shopify catalogue import and shared duplicate review are included; Shopify-to-marketplace draft creation remains planned work.
+The available draft creation routes in `0.0.21` are eBay UK, Etsy and TikTok Shop to Shopify. Shopify catalogue import and shared duplicate review are included; Shopify-to-marketplace draft creation remains planned work.
 
 ### TikTok Shop connection
 
