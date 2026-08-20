@@ -47,6 +47,13 @@ def test_inventory_mutations_include_required_idempotency_directive():
     assert "@idempotent(key: $idempotencyKey)" in INVENTORY_SET
 
 
+def test_inventory_quantities_include_required_compare_field():
+    import inspect
+
+    source = inspect.getsource(ShopifyClient._set_inventory)
+    assert '"changeFromQuantity": None' in source
+
+
 def test_dashboard_supports_bulk_draft_selection():
     html = render_dashboard([
         {"title": "Etsy item", "source": "etsy", "source_id": "123", "shopify_id": None},
