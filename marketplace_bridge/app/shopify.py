@@ -7,8 +7,8 @@ import httpx
 
 
 PRODUCT_SET = """
-mutation ProductSet($input: ProductSetInput!, $synchronous: Boolean!) {
-  productSet(input: $input, synchronous: $synchronous) {
+mutation ProductSet($input: ProductSetInput!, $identifier: ProductSetIdentifiers, $synchronous: Boolean!) {
+  productSet(input: $input, identifier: $identifier, synchronous: $synchronous) {
     product { id title status variants(first: 250) { nodes { id sku inventoryItem { id } } } }
     userErrors { field message code }
   }
@@ -141,13 +141,20 @@ class ShopifyClient:
             if variant.get("barcode"):
                 record["barcode"] = variant["barcode"]
             variants.append(record)
-        external_id = f"ebay-{product['source_id']}"
-        data = await self.graphql(PRODUCT_SET, {"synchronous": True, "input": {
-            "identifier": {"customId": {"namespace": "marketplace_bridge", "key": "source", "value": external_id}},
+        # A deterministic handle makes retries idempotent without requiring a
+        # merchant-specific unique metafield definition.
+        source_handle = f"shop-sync-{product['source']}-{product['source_id']}".lower()
+        product_input = {
+            "handle": source_handle,
             "title": product["title"], "descriptionHtml": product["description_html"], "status": "DRAFT",
             "vendor": product.get("vendor") or "", "productType": product.get("product_type") or "",
             "tags": product.get("tags", []), "productOptions": product_options, "variants": variants,
-        }})
+        }
+        data = await self.graphql(PRODUCT_SET, {
+            "synchronous": True,
+            "identifier": {"handle": source_handle},
+            "input": product_input,
+        })
         result = data["productSet"]
         if result["userErrors"]:
             raise RuntimeError("; ".join(error["message"] for error in result["userErrors"]))
@@ -198,4 +205,3 @@ class ShopifyClient:
             errors = data["inventorySetQuantities"]["userErrors"]
             if errors:
                 raise RuntimeError("; ".join(e["message"] for e in errors))
-
