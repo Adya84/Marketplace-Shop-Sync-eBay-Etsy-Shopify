@@ -44,7 +44,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.17", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.18", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -299,7 +299,7 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     <section class="card"><h2>Import</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button></section>
     <section class="card"><div class="hero"><h2>Ready to send</h2><div><button onclick="toggleAll()">Select all</button> <button onclick="createSelected()">Create selected drafts</button></div></div><table><thead><tr><th>Select</th><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{pending_rows or '<tr><td colspan="4">No listings waiting to be sent.</td></tr>'}</tbody></table></section>
     <section class="card"><h2>Completed</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Shopify product</th></tr></thead><tbody>{completed_rows or '<tr><td colspan="3">No completed drafts yet.</td></tr>'}</tbody></table></section>
-    <section class="card"><div class="hero"><h2>Activity</h2><button onclick="clearActivity()">Clear activity</button></div><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
+    <section class="card"><div class="hero"><h2>Activity</h2><div><button onclick="refreshActivity()">Refresh activity</button> <button onclick="clearActivity()">Clear activity</button></div></div><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody id="activity-rows">{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table><small>Updates automatically every 60 seconds.</small></section>
     <footer class="footer">Copyright © 2026 Adrian Apel · All rights reserved · <a href="https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></footer>
     <script>
     function endpoint(path){{
@@ -350,6 +350,26 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
       const r=await fetch(endpoint('api/activity/clear'),{{method:'POST'}});
       if(!r.ok)alert(await r.text());else location.reload();
     }}
-    function formHasData(){{return [...document.querySelectorAll('input')].some(input => input.value.length > 0)}}
-    setTimeout(()=>{{if(!formHasData())location.reload()}},10000)
+    function activityCell(row,text){{
+      const cell=document.createElement('td'); cell.textContent=String(text ?? ''); row.appendChild(cell);
+    }}
+    async function refreshActivity(){{
+      try{{
+        const response=await fetch(endpoint('api/status'),{{cache:'no-store'}});
+        if(!response.ok)throw new Error(await response.text());
+        const data=await response.json();
+        const body=document.getElementById('activity-rows'); body.replaceChildren();
+        if(!data.jobs.length){{
+          const row=document.createElement('tr'); const cell=document.createElement('td');
+          cell.colSpan=4; cell.textContent='No activity yet.'; row.appendChild(cell); body.appendChild(row); return;
+        }}
+        data.jobs.forEach(job=>{{
+          const row=document.createElement('tr');
+          activityCell(row,job.kind.replaceAll('_',' ').replace(/\\b\\w/g,letter=>letter.toUpperCase()));
+          activityCell(row,job.status); activityCell(row,`${{job.progress}}/${{job.total}}`); activityCell(row,job.message);
+          body.appendChild(row);
+        }});
+      }}catch(error){{console.warn('Activity refresh failed',error)}}
+    }}
+    setInterval(refreshActivity,60000)
     </script></main></body></html>'''
