@@ -28,3 +28,5 @@ def test_dashboard_submits_connections_through_ingress_path():
     assert "fetch(endpoint(form.getAttribute('action'))" in html
     assert 'action="api/settings/shopify"' in html
     assert 'action="api/settings/ebay"' in html
+    assert 'action="api/oauth/etsy/start"' in html
+    assert 'action="api/oauth/etsy/finish"' in html

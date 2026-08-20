@@ -78,6 +78,10 @@ class Database:
             row = conn.execute("SELECT payload FROM credentials WHERE provider=?", (provider,)).fetchone()
             return row[0] if row else None
 
+    def delete_credential(self, provider: str):
+        with self.connect() as conn:
+            conn.execute("DELETE FROM credentials WHERE provider=?", (provider,))
+
     def save_product(self, product: Product):
         with self.connect() as conn:
             conn.execute(
