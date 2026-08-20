@@ -33,6 +33,32 @@ class EtsyClient:
     def api_key(self) -> str:
         return f"{self.keystring}:{self.shared_secret}"
 
+    @staticmethod
+    async def exchange_code(keystring: str, code: str, verifier: str, redirect_uri: str) -> dict:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                "https://api.etsy.com/v3/public/oauth/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": keystring,
+                    "redirect_uri": redirect_uri,
+                    "code": code,
+                    "code_verifier": verifier,
+                },
+            )
+            response.raise_for_status()
+        return response.json()
+
+    async def find_authorised_shop(self) -> dict:
+        user_id = self.access_token.split(".", 1)[0]
+        if not user_id.isdigit():
+            raise RuntimeError("Etsy returned an invalid user access token")
+        payload = await self._get(f"/v3/application/users/{user_id}/shops")
+        shops = payload.get("results", [])
+        if not shops:
+            raise RuntimeError("No Etsy shop is associated with the authorised seller")
+        return shops[0]
+
     async def _refresh(self):
         if not self.refresh_token:
             return

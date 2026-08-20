@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import logging
+import secrets as token_secrets
+import time
 from contextlib import asynccontextmanager
+from urllib.parse import urlencode
 
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse
@@ -38,7 +43,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.6", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.7", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -65,18 +70,59 @@ async def configure_ebay(access_token: str = Form(...)):
     return {"connected": True}
 
 
-@app.post("/api/settings/etsy")
-async def configure_etsy(
+@app.post("/api/oauth/etsy/start")
+async def start_etsy_oauth(
     keystring: str = Form(...),
     shared_secret: str = Form(...),
-    shop_id: str = Form(...),
-    access_token: str = Form(...),
-    refresh_token: str = Form(""),
 ):
-    client = EtsyClient(keystring, shared_secret, shop_id, access_token, refresh_token)
-    shop = await client.test()
+    verifier = token_secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    state = token_secrets.token_urlsafe(32)
+    save_credentials("etsy_oauth", {
+        "keystring": keystring.strip(),
+        "shared_secret": shared_secret.strip(),
+        "verifier": verifier,
+        "state": state,
+        "created_at": time.time(),
+    })
+    query = urlencode({
+        "response_type": "code",
+        "client_id": keystring.strip(),
+        "redirect_uri": settings.etsy_redirect_uri,
+        "scope": "listings_r shops_r",
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    })
+    return {"authorization_url": f"https://www.etsy.com/oauth/connect?{query}"}
+
+
+@app.post("/api/oauth/etsy/finish")
+async def finish_etsy_oauth(oauth_result: str = Form(...)):
+    pending = get_credentials("etsy_oauth")
+    if time.time() - float(pending.get("created_at", 0)) > 900:
+        db.delete_credential("etsy_oauth")
+        raise HTTPException(400, "Etsy connection expired; start again")
+    try:
+        padded = oauth_result.strip() + "=" * (-len(oauth_result.strip()) % 4)
+        result = json.loads(base64.urlsafe_b64decode(padded).decode())
+    except Exception as exc:
+        raise HTTPException(400, "Invalid Etsy authorization result") from exc
+    if not token_secrets.compare_digest(str(result.get("state", "")), pending["state"]):
+        raise HTTPException(400, "Etsy authorization state did not match")
+    payload = await EtsyClient.exchange_code(
+        pending["keystring"], result.get("code", ""), pending["verifier"], settings.etsy_redirect_uri
+    )
+    expires_at = time.time() + int(payload.get("expires_in", 3600))
+    client = EtsyClient(
+        pending["keystring"], pending["shared_secret"], "pending",
+        payload["access_token"], payload.get("refresh_token", ""), expires_at,
+    )
+    shop = await client.find_authorised_shop()
+    client.shop_id = str(shop["shop_id"])
     save_credentials("etsy", client.credential_payload())
-    return {"connected": True, "shop": shop.get("shop_name", shop_id)}
+    db.delete_credential("etsy_oauth")
+    return {"connected": True, "shop": shop.get("shop_name", client.shop_id)}
 
 
 @app.post("/api/settings/shopify")
@@ -206,7 +252,8 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     <div class="grid"><section class="card"><h2>eBay UK</h2><div class="status"><i class="dot {'ok' if ebay_connected else ''}"></i>{'Connected' if ebay_connected else 'Not connected'}</div>
     <form method="post" action="api/settings/ebay" onsubmit="connect(event)"><label>Production user access token</label><input name="access_token" type="password" required autocomplete="off"><button>Test and save</button></form></section>
     <section class="card"><h2>Etsy</h2><div class="status"><i class="dot {'ok' if etsy_connected else ''}"></i>{'Connected' if etsy_connected else 'Not connected'}</div>
-    <form method="post" action="api/settings/etsy" onsubmit="connect(event)"><label>API keystring</label><input name="keystring" type="password" required autocomplete="off"><label>Shared secret</label><input name="shared_secret" type="password" required autocomplete="off"><label>Shop ID</label><input name="shop_id" required><label>OAuth access token</label><input name="access_token" type="password" required autocomplete="off"><label>OAuth refresh token</label><input name="refresh_token" type="password" autocomplete="off"><button>Test and save</button></form></section>
+    <form method="post" action="api/oauth/etsy/start" onsubmit="startEtsy(event)"><label>API keystring</label><input name="keystring" type="password" required autocomplete="off"><label>Shared secret</label><input name="shared_secret" type="password" required autocomplete="off"><button>Connect Etsy</button></form>
+    <form method="post" action="api/oauth/etsy/finish" onsubmit="connect(event)" class="etsy-finish"><label>Authorization result</label><input name="oauth_result" required autocomplete="off" placeholder="Paste the result copied from the Etsy approval page"><button>Finish Etsy connection</button></form><small>Tokens and Shop ID are created automatically. Never paste them into chat or screenshots.</small></section>
     <section class="card"><h2>Shopify</h2><div class="status"><i class="dot {'ok' if shopify_connected else ''}"></i>{'Connected' if shopify_connected else 'Not connected'}</div>
     <form method="post" action="api/settings/shopify" onsubmit="connect(event)"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
     <section class="card"><h2>Import</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button></section>
@@ -228,6 +275,19 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
         if(!response.ok)throw new Error(await response.text());
         location.reload();
       }}catch(error){{alert(error.message); button.disabled=false; button.textContent='Test and save'}}
+    }}
+    async function startEtsy(event){{
+      event.preventDefault();
+      const form=event.currentTarget;
+      const button=form.querySelector('button');
+      button.disabled=true; button.textContent='Opening Etsy...';
+      try{{
+        const response=await fetch(endpoint(form.getAttribute('action')),{{method:'POST',body:new FormData(form)}});
+        if(!response.ok)throw new Error(await response.text());
+        const data=await response.json();
+        window.open(data.authorization_url,'_blank','noopener');
+        button.disabled=false; button.textContent='Connect Etsy';
+      }}catch(error){{alert(error.message); button.disabled=false; button.textContent='Connect Etsy'}}
     }}
     async function send(path){{let r=await fetch(endpoint(path),{{method:'POST'}});if(!r.ok)alert(await r.text());else{{setTimeout(()=>location.reload(),800)}}}}
     function formHasData(){{return [...document.querySelectorAll('input')].some(input => input.value.length > 0)}}

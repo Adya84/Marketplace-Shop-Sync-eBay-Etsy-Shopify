@@ -4,12 +4,12 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.6` implements **eBay UK or Etsy to Shopify**, with Shopify intended to become the catalogue master.
+Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.7` implements **eBay UK or Etsy to Shopify**, with Shopify intended to become the catalogue master.
 
 > [!IMPORTANT]
 > This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation and multi-user onboarding are not implemented yet.
 
-## What version 0.0.6 does
+## What version 0.0.7 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -24,6 +24,7 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Submits connections and actions through the correct Home Assistant Ingress path.
 - Imports active Etsy listings through Open API v3, including descriptions, images, variations, SKUs, prices and quantities.
 - Renews Etsy OAuth access tokens automatically when a refresh token is available.
+- Guides Etsy sign-in with PKCE, validates single-use state and discovers the authorised Shop ID automatically.
 
 ## Not implemented yet
 
@@ -36,7 +37,7 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The available import routes in `0.0.6` are eBay UK to Shopify and Etsy to Shopify.
+The available import routes in `0.0.7` are eBay UK to Shopify and Etsy to Shopify.
 
 ## Install in Home Assistant OS
 
@@ -57,7 +58,7 @@ Shop Sync is distributed as a Home Assistant custom add-on, not through HACS. It
 
 ## Connect eBay
 
-Version `0.0.6` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
+Version `0.0.7` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
 
 Enter the token on the Shop Sync page and select **Test and save**. The add-on validates it by requesting the account's active listings before storing it.
 
@@ -81,9 +82,15 @@ Shop Sync exchanges these credentials directly with the store's official token e
 
 ## Connect Etsy
 
-Create an Etsy Open API v3 application and authorise it for the seller with `listings_r` and `shops_r`. Enter its API keystring, shared secret, numeric Shop ID, OAuth access token and refresh token on the Shop Sync page. Credentials and tokens are stored in the app's encrypted credential store; access tokens are renewed automatically.
+Create an Etsy Open API v3 Seller App and add this exact redirect URI to its settings:
 
-Etsy requires an approved API application and an HTTPS OAuth callback. Guided PKCE sign-in and the hosted callback service are planned for the public multi-user release. Version `0.0.6` accepts credentials produced by Etsy's official OAuth flow.
+```text
+https://adya84.github.io/Marketplace-Shop-Sync-eBay-Etsy-Shopify/etsy-callback.html
+```
+
+On the Shop Sync page, enter the app's keystring and shared secret, then select **Connect Etsy**. Approve the official Etsy consent screen with `listings_r` and `shops_r`, copy the authorization result from the Shop Sync callback page, and paste it into **Authorization result**. Shop Sync validates the state and PKCE verifier, exchanges the one-use code directly with Etsy, discovers the Shop ID, and stores the resulting credentials in its encrypted credential store. Access tokens are renewed automatically.
+
+The GitHub repository must have Pages enabled from the `/docs` folder on the `main` branch for the HTTPS callback to load.
 
 ## Transfer a listing
 

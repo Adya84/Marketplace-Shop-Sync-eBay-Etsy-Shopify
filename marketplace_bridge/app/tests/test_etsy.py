@@ -30,3 +30,8 @@ def test_normalises_complete_etsy_listing():
     assert product.variants[0].quantity == 3
     assert product.variants[0].options[0].value == "Red"
 
+
+def test_authorised_user_id_comes_from_access_token():
+    client = EtsyClient("key", "secret", "pending", "12345678.oauth-token")
+    assert client.access_token.split(".", 1)[0] == "12345678"
+
