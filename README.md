@@ -1,15 +1,17 @@
 # Shop Sync: eBay, Etsy and Shopify
 
+[![Licence](https://img.shields.io/badge/licence-Shop%20Sync%20Personal%20%26%20Store%20Use-red.svg)](LICENSE)
+
 <p align="center">
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.12` implements **eBay UK or Etsy to Shopify**, with Shopify intended to become the catalogue master.
+Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.13` implements **eBay UK or Etsy to Shopify**, with Shopify intended to become the catalogue master.
 
 > [!IMPORTANT]
 > This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation and multi-user onboarding are not implemented yet.
 
-## What version 0.0.12 does
+## What version 0.0.13 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -26,6 +28,8 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Renews Etsy OAuth access tokens automatically when a refresh token is available.
 - Guides Etsy sign-in with PKCE, validates single-use state and discovers the authorised Shop ID automatically.
 - Provides an optional **Buy me a beer** button linked directly to the Graffidoodle PayPal page.
+- Displays an Adrian Apel copyright notice and links to the Shop Sync licence.
+- Allows multiple imported products to be selected and queued as Shopify drafts together.
 
 ## Not implemented yet
 
@@ -38,7 +42,7 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The available import routes in `0.0.12` are eBay UK to Shopify and Etsy to Shopify.
+The available import routes in `0.0.13` are eBay UK to Shopify and Etsy to Shopify.
 
 ## Complete setup guide
 
@@ -113,8 +117,8 @@ Etsy should now show green **Connected**. The authorization result and Etsy code
 
 ### 5. Create and verify a Shopify draft
 
-1. Start with one simple imported listing.
-2. Select **Create Shopify draft** beside it.
+1. Start with one simple imported listing and select **Create Shopify draft** beside it.
+2. After verifying the first draft, tick any additional products you want, or use **Select all**, then select **Create selected drafts**.
 3. Wait for the Shopify export job to complete.
 4. In Shopify Admin, open **Products** and inspect the new draft.
 5. Check its title, description, full-size images and image order, variations, variation images where Etsy supplied associations, SKUs, prices and stock quantities.
@@ -142,7 +146,7 @@ If Home Assistant still shows the installed and latest versions as identical, re
 
 ## Connect eBay
 
-Version `0.0.12` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
+Version `0.0.13` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
 
 Enter the token on the Shop Sync page and select **Test and save**. The app validates it by requesting the account's active listings before storing it.
 
@@ -221,3 +225,9 @@ The repository root is a Home Assistant custom add-on repository. The installabl
 ## Support
 
 Use [GitHub Issues](https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify/issues) for reproducible bugs and feature requests. Remove tokens, personal data, order details and customer information from logs before attaching them.
+
+## Licence
+
+Copyright (C) 2026 Adrian Apel. All rights reserved.
+
+Shop Sync is provided under the [Shop Sync Home Assistant App Licence](LICENSE). It can be used free of charge on your own Home Assistant installation to manage marketplace accounts and stores you own or are authorised to operate. Redistribution, rebranding, resale, publication of modified versions, paid hosting and inclusion in paid products or services require prior written permission.

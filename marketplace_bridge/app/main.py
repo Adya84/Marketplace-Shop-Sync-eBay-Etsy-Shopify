@@ -44,7 +44,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.12", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.13", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -221,6 +221,24 @@ def export_shopify(source: str, source_id: str, background_tasks: BackgroundTask
     return {"job_id": job_id}
 
 
+@app.post("/api/products/shopify/bulk")
+def export_shopify_bulk(background_tasks: BackgroundTasks, selected: list[str] = Form(...)):
+    if not selected:
+        raise HTTPException(400, "Select at least one product")
+    jobs = []
+    for key in dict.fromkeys(selected):
+        try:
+            source, source_id = key.split(":", 1)
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid product selection") from exc
+        if not db.get_product(source, source_id):
+            raise HTTPException(404, f"Product not found: {source} {source_id}")
+        job_id = db.create_job("shopify_export")
+        background_tasks.add_task(run_shopify_export, job_id, source, source_id)
+        jobs.append(job_id)
+    return {"job_ids": jobs, "count": len(jobs)}
+
+
 async def run_shopify_export(job_id: int, source: str, source_id: str):
     try:
         db.update_job(job_id, status="running", total=1, message="Creating Shopify draft")
@@ -252,7 +270,7 @@ def dashboard():
 
 def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected):
     esc = __import__("html").escape
-    product_rows = "".join(f'''<tr><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
+    product_rows = "".join(f'''<tr><td>{'' if p['shopify_id'] else f'<input class="product-select" type="checkbox" value="{esc(p["source"])}:{esc(p["source_id"])}" aria-label="Select {esc(p["title"])}">'} </td><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
       <td><span class="pill {'ok' if p['shopify_id'] else ''}">{'Linked' if p['shopify_id'] else 'Imported'}</span></td>
       <td>{'' if p['shopify_id'] else f'<button onclick="send(\'api/products/{p["source"]}/{p["source_id"]}/shopify\')">Create Shopify draft</button>'}</td></tr>''' for p in products)
     job_rows = "".join(f"<tr><td>{esc(j['kind'].replace('_',' ').title())}</td><td>{esc(j['status'])}</td><td>{j['progress']}/{j['total']}</td><td>{esc(j['message'])}</td></tr>" for j in jobs)
@@ -262,8 +280,9 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}}main{{max-width:1100px;margin:auto;padding:28px}}
     h1{{font-size:28px;margin:0}}h2{{font-size:18px;margin:0 0 16px}}p,small{{color:var(--muted)}}.hero{{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}}
     .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}}.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}}
-    input{{width:100%;background:#09111e;color:var(--text);border:1px solid var(--line);padding:11px;border-radius:8px;margin:6px 0 12px}}button,.button-link{{background:var(--blue);border:0;color:#04111e;font-weight:700;border-radius:8px;padding:10px 14px;cursor:pointer;text-decoration:none;display:inline-block}}
+    input{{width:100%;background:#09111e;color:var(--text);border:1px solid var(--line);padding:11px;border-radius:8px;margin:6px 0 12px}}input[type=checkbox]{{width:18px;height:18px;margin:0;accent-color:var(--blue)}}button,.button-link{{background:var(--blue);border:0;color:#04111e;font-weight:700;border-radius:8px;padding:10px 14px;cursor:pointer;text-decoration:none;display:inline-block}}
     .status{{display:flex;gap:8px;align-items:center}}.dot{{width:10px;height:10px;background:#e85d75;border-radius:50%}}.dot.ok{{background:var(--green)}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px;border-top:1px solid var(--line)}}small{{display:block;margin-top:3px}}.pill{{background:#2d3b50;padding:4px 8px;border-radius:99px;font-size:12px}}.pill.ok{{background:#145c47;color:#9effd8}}
+    .footer{{text-align:center;color:var(--muted);font-size:12px;padding:10px 0 4px}}.footer a{{color:var(--muted)}}
     @media(max-width:650px){{main{{padding:16px}}.hero{{display:block}}table{{display:block;overflow:auto}}}}
     </style></head><body><main><div class="hero"><div><h1>Shop Sync</h1><p>Move complete listings between your marketplaces</p></div><a class="button-link" href="https://paypal.me/graffidoodle" target="_blank" rel="noopener noreferrer" aria-label="Buy me a beer">🍺 Buy me a beer</a></div>
     <div class="grid"><section class="card"><h2>eBay UK</h2><div class="status"><i class="dot {'ok' if ebay_connected else ''}"></i>{'Connected' if ebay_connected else 'Not connected'}</div>
@@ -274,8 +293,9 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     <section class="card"><h2>Shopify</h2><div class="status"><i class="dot {'ok' if shopify_connected else ''}"></i>{'Connected' if shopify_connected else 'Not connected'}</div>
     <form method="post" action="api/settings/shopify" onsubmit="connect(event)"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
     <section class="card"><h2>Import</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button></section>
-    <section class="card"><h2>Products</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="3">Connect a marketplace and import listings to begin.</td></tr>'}</tbody></table></section>
+    <section class="card"><div class="hero"><h2>Products</h2><div><button onclick="toggleAll()">Select all</button> <button onclick="createSelected()">Create selected drafts</button></div></div><table><thead><tr><th>Select</th><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="4">Connect a marketplace and import listings to begin.</td></tr>'}</tbody></table></section>
     <section class="card"><div class="hero"><h2>Activity</h2><button onclick="clearActivity()">Clear activity</button></div><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
+    <footer class="footer">Copyright © 2026 Adrian Apel · All rights reserved · <a href="https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></footer>
     <script>
     function endpoint(path){{
       const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
@@ -307,6 +327,19 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
       }}catch(error){{alert(error.message); button.disabled=false; button.textContent='Connect Etsy'}}
     }}
     async function send(path){{let r=await fetch(endpoint(path),{{method:'POST'}});if(!r.ok)alert(await r.text());else{{setTimeout(()=>location.reload(),800)}}}}
+    function toggleAll(){{
+      const boxes=[...document.querySelectorAll('.product-select')];
+      const select=!boxes.every(box=>box.checked);
+      boxes.forEach(box=>box.checked=select);
+    }}
+    async function createSelected(){{
+      const selected=[...document.querySelectorAll('.product-select:checked')];
+      if(!selected.length){{alert('Select at least one product');return}}
+      if(!confirm(`Create ${{selected.length}} Shopify draft${{selected.length===1?'':'s'}}?`))return;
+      const data=new FormData(); selected.forEach(box=>data.append('selected',box.value));
+      const r=await fetch(endpoint('api/products/shopify/bulk'),{{method:'POST',body:data}});
+      if(!r.ok)alert(await r.text());else location.reload();
+    }}
     async function clearActivity(){{
       if(!confirm('Clear completed and failed activity?'))return;
       const r=await fetch(endpoint('api/activity/clear'),{{method:'POST'}});
