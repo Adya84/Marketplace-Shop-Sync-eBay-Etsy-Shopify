@@ -130,3 +130,6 @@ class Database:
         with self.connect() as conn:
             return [dict(row) for row in conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,))]
 
+    def clear_finished_jobs(self):
+        with self.connect() as conn:
+            conn.execute("DELETE FROM jobs WHERE status IN ('complete', 'failed')")

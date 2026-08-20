@@ -44,7 +44,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.10", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.11", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -169,6 +169,12 @@ def import_etsy(background_tasks: BackgroundTasks):
     return {"job_id": job_id}
 
 
+@app.post("/api/activity/clear")
+def clear_activity():
+    db.clear_finished_jobs()
+    return {"cleared": True}
+
+
 async def run_ebay_import(job_id: int):
     try:
         db.update_job(job_id, status="running", message="Reading active eBay listings")
@@ -269,7 +275,7 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     <form method="post" action="api/settings/shopify" onsubmit="connect(event)"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
     <section class="card"><h2>Import</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button></section>
     <section class="card"><h2>Products</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="3">Connect a marketplace and import listings to begin.</td></tr>'}</tbody></table></section>
-    <section class="card"><h2>Activity</h2><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
+    <section class="card"><div class="hero"><h2>Activity</h2><button onclick="clearActivity()">Clear activity</button></div><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
     <script>
     function endpoint(path){{
       const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
@@ -301,6 +307,11 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
       }}catch(error){{alert(error.message); button.disabled=false; button.textContent='Connect Etsy'}}
     }}
     async function send(path){{let r=await fetch(endpoint(path),{{method:'POST'}});if(!r.ok)alert(await r.text());else{{setTimeout(()=>location.reload(),800)}}}}
+    async function clearActivity(){{
+      if(!confirm('Clear completed and failed activity?'))return;
+      const r=await fetch(endpoint('api/activity/clear'),{{method:'POST'}});
+      if(!r.ok)alert(await r.text());else location.reload();
+    }}
     function formHasData(){{return [...document.querySelectorAll('input')].some(input => input.value.length > 0)}}
     setTimeout(()=>{{if(!formHasData())location.reload()}},10000)
     </script></main></body></html>'''
