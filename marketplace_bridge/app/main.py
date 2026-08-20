@@ -44,7 +44,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.18", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.19", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -90,7 +90,7 @@ async def start_etsy_oauth(
         "response_type": "code",
         "client_id": keystring.strip(),
         "redirect_uri": settings.etsy_redirect_uri,
-        "scope": "listings_r shops_r",
+        "scope": "listings_r listings_w shops_r",
         "state": state,
         "code_challenge": challenge,
         "code_challenge_method": "S256",
@@ -169,6 +169,14 @@ def import_etsy(background_tasks: BackgroundTasks):
     return {"job_id": job_id}
 
 
+@app.post("/api/import/shopify")
+def import_shopify(background_tasks: BackgroundTasks):
+    get_credentials("shopify")
+    job_id = db.create_job("shopify_import")
+    background_tasks.add_task(run_shopify_import, job_id)
+    return {"job_id": job_id}
+
+
 @app.post("/api/activity/clear")
 def clear_activity():
     db.clear_finished_jobs()
@@ -211,11 +219,40 @@ async def run_etsy_import(job_id: int):
         db.update_job(job_id, status="failed", message=str(exc)[:500])
 
 
+async def run_shopify_import(job_id: int):
+    try:
+        db.update_job(job_id, status="running", message="Reading Shopify catalogue")
+        credential = get_credentials("shopify")
+        client = ShopifyClient(credential["shop_domain"], settings.shopify_api_version,
+                               client_id=credential["client_id"], client_secret=credential["client_secret"])
+        products = await client.list_products()
+        db.update_job(job_id, total=len(products), message=f"Found {len(products)} products")
+        for index, product in enumerate(products, 1):
+            db.save_product(product)
+            db.update_job(job_id, progress=index, message=f"Imported {product.title}")
+        db.update_job(job_id, status="complete", progress=len(products), message=f"Imported {len(products)} Shopify products")
+    except Exception as exc:
+        log.exception("Shopify import failed")
+        db.update_job(job_id, status="failed", message=str(exc)[:500])
+
+
+@app.post("/api/duplicates/{destination}/{source}/{source_id}/approve")
+def approve_duplicate(destination: str, source: str, source_id: str):
+    if destination not in {"shopify", "etsy", "ebay"}:
+        raise HTTPException(400, "Invalid destination")
+    if not db.get_product(source, source_id):
+        raise HTTPException(404, "Product not found")
+    db.approve_duplicate(source, source_id, destination)
+    return {"approved": True}
+
+
 @app.post("/api/products/{source}/{source_id}/shopify")
 def export_shopify(source: str, source_id: str, background_tasks: BackgroundTasks):
     get_credentials("shopify")
     if not db.get_product(source, source_id):
         raise HTTPException(404, "Product not found")
+    if db.duplicate_is_blocked(source, source_id, "shopify"):
+        raise HTTPException(409, "Duplicate title requires review before creating this Shopify draft")
     job_id = db.create_job("shopify_export")
     background_tasks.add_task(run_shopify_export, job_id, source, source_id)
     return {"job_id": job_id}
@@ -233,6 +270,8 @@ def export_shopify_bulk(background_tasks: BackgroundTasks, selected: list[str] =
             raise HTTPException(400, "Invalid product selection") from exc
         if not db.get_product(source, source_id):
             raise HTTPException(404, f"Product not found: {source} {source_id}")
+        if db.duplicate_is_blocked(source, source_id, "shopify"):
+            raise HTTPException(409, f"Duplicate title requires review: {source} {source_id}")
         job_id = db.create_job("shopify_export")
         background_tasks.add_task(run_shopify_export, job_id, source, source_id)
         jobs.append(job_id)
@@ -270,13 +309,15 @@ def dashboard():
 
 def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected):
     esc = __import__("html").escape
-    pending = [product for product in products if not product["shopify_id"]]
-    completed = [product for product in products if product["shopify_id"]]
+    pending = [p for p in products if p["source"] != "shopify" and not p["shopify_id"] and (not p["is_duplicate"] or p["duplicate_approved_shopify"])]
+    duplicate_review = [p for p in products if p["source"] != "shopify" and not p["shopify_id"] and p["is_duplicate"] and not p["duplicate_approved_shopify"]]
+    completed = [p for p in products if p["source"] != "shopify" and p["shopify_id"]]
     pending_rows = "".join(f'''<tr><td><input class="product-select" type="checkbox" value="{esc(p["source"])}:{esc(p["source_id"])}" aria-label="Select {esc(p["title"])}"></td><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
       <td><span class="pill">Imported</span></td>
       <td><button onclick="send('api/products/{p["source"]}/{p["source_id"]}/shopify')">Create Shopify draft</button></td></tr>''' for p in pending)
     completed_rows = "".join(f'''<tr><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
       <td><span class="pill ok">Completed</span></td><td><small>{esc(p['shopify_id'])}</small></td></tr>''' for p in completed)
+    duplicate_rows = "".join(f'''<tr><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td><td><span class="pill">Review required</span></td><td><button onclick="approveDuplicate('shopify','{esc(p['source'])}','{esc(p['source_id'])}')">Approve for Shopify</button></td></tr>''' for p in duplicate_review)
     job_rows = "".join(f"<tr><td>{esc(j['kind'].replace('_',' ').title())}</td><td>{esc(j['status'])}</td><td>{j['progress']}/{j['total']}</td><td>{esc(j['message'])}</td></tr>" for j in jobs)
     return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shop Sync</title>
     <style>
@@ -296,7 +337,8 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     <form method="post" action="api/oauth/etsy/finish" onsubmit="connect(event)" class="etsy-finish"><label>Authorization result</label><input name="oauth_result" required autocomplete="off" placeholder="Paste the result copied from the Etsy approval page"><button>Finish Etsy connection</button></form><small>Tokens and Shop ID are created automatically. Never paste them into chat or screenshots.</small></section>
     <section class="card"><h2>Shopify</h2><div class="status"><i class="dot {'ok' if shopify_connected else ''}"></i>{'Connected' if shopify_connected else 'Not connected'}</div>
     <form method="post" action="api/settings/shopify" onsubmit="connect(event)"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
-    <section class="card"><h2>Import</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button></section>
+    <section class="card"><h2>Import catalogues</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button> <button onclick="send('api/import/shopify')" {'disabled' if not shopify_connected else ''}>Import Shopify products</button></section>
+    <section class="card"><h2>Review duplicate titles</h2><p>Matching titles are held here and excluded from bulk draft creation until approved for the selected destination.</p><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{duplicate_rows or '<tr><td colspan="3">No duplicate titles need review.</td></tr>'}</tbody></table></section>
     <section class="card"><div class="hero"><h2>Ready to send</h2><div><button onclick="toggleAll()">Select all</button> <button onclick="createSelected()">Create selected drafts</button></div></div><table><thead><tr><th>Select</th><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{pending_rows or '<tr><td colspan="4">No listings waiting to be sent.</td></tr>'}</tbody></table></section>
     <section class="card"><h2>Completed</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Shopify product</th></tr></thead><tbody>{completed_rows or '<tr><td colspan="3">No completed drafts yet.</td></tr>'}</tbody></table></section>
     <section class="card"><div class="hero"><h2>Activity</h2><div><button onclick="refreshActivity()">Refresh activity</button> <button onclick="clearActivity()">Clear activity</button></div></div><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody id="activity-rows">{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table><small>Updates automatically every 60 seconds.</small></section>
@@ -348,6 +390,11 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     async function clearActivity(){{
       if(!confirm('Clear completed and failed activity?'))return;
       const r=await fetch(endpoint('api/activity/clear'),{{method:'POST'}});
+      if(!r.ok)alert(await r.text());else location.reload();
+    }}
+    async function approveDuplicate(destination,source,sourceId){{
+      if(!confirm(`Approve this duplicate for ${{destination}} draft creation?`))return;
+      const r=await fetch(endpoint(`api/duplicates/${{destination}}/${{source}}/${{sourceId}}/approve`),{{method:'POST'}});
       if(!r.ok)alert(await r.text());else location.reload();
     }}
     function activityCell(row,text){{

@@ -6,12 +6,12 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.18` implements **eBay UK or Etsy to Shopify**, with Shopify intended to become the catalogue master.
+Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.19` implements **eBay UK or Etsy to Shopify**, imports the Shopify master catalogue, and adds destination-specific duplicate-title review.
 
 > [!IMPORTANT]
 > This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation and multi-user onboarding are not implemented yet.
 
-## What version 0.0.18 does
+## What version 0.0.19 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -31,6 +31,9 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Displays an Adrian Apel copyright notice and links to the Shop Sync licence.
 - Allows multiple imported products to be selected and queued as Shopify drafts together.
 - Moves successfully created Shopify drafts from **Ready to send** into a separate **Completed** section.
+- Imports the Shopify product catalogue so it can be used as the master comparison source and prepared for Shopify-to-marketplace transfers.
+- Detects duplicate titles across imported Etsy, eBay and Shopify catalogues after ignoring case, punctuation and repeated spacing.
+- Holds duplicate candidates in **Review duplicate titles** and excludes them from individual and bulk draft creation until approved for that destination.
 - Refreshes Activity automatically every 60 seconds without reloading connection forms.
 
 ## Not implemented yet
@@ -44,7 +47,7 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The available import routes in `0.0.18` are eBay UK to Shopify and Etsy to Shopify.
+The available draft creation routes in `0.0.19` are eBay UK to Shopify and Etsy to Shopify. Shopify catalogue import and shared duplicate review are now included; Shopify-to-Etsy and Shopify-to-eBay draft creation are the next routes.
 
 ## Complete setup guide
 
@@ -103,7 +106,7 @@ If Shopify scopes are changed later, releasing a version is not enough. Uninstal
 4. Save the callback URL.
 5. Copy the Etsy app's **keystring** and **shared secret**. Keep them private.
 6. In Home Assistant, enter both values in the Etsy panel and select **Connect Etsy**.
-7. Approve the official Etsy consent screen. Shop Sync requests only `listings_r` and `shops_r` for the current Etsy import route.
+7. Approve the official Etsy consent screen. Shop Sync requests `listings_r`, `listings_w`, and `shops_r`; write access is needed for the upcoming Shopify-to-Etsy draft route. Existing users must reconnect Etsy once after installing 0.0.19 to grant the added scope.
 8. On the **Etsy approved** callback page, select **Copy authorization result**.
 9. Return to Home Assistant, paste it into **Authorization result**, and select **Finish Etsy connection**.
 
@@ -148,7 +151,7 @@ If Home Assistant still shows the installed and latest versions as identical, re
 
 ## Connect eBay
 
-Version `0.0.18` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
+Version `0.0.19` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
 
 Enter the token on the Shop Sync page and select **Test and save**. The app validates it by requesting the account's active listings before storing it.
 
@@ -178,7 +181,17 @@ Create an Etsy Open API v3 Seller App and add this exact redirect URI to its set
 https://adya84.github.io/Marketplace-Shop-Sync-eBay-Etsy-Shopify/etsy-callback.html
 ```
 
-On the Shop Sync page, enter the app's keystring and shared secret, then select **Connect Etsy**. Approve the official Etsy consent screen with `listings_r` and `shops_r`, copy the authorization result from the Shop Sync callback page, and paste it into **Authorization result**. Shop Sync validates the state and PKCE verifier, exchanges the one-use code directly with Etsy, discovers the Shop ID, and stores the resulting credentials in its encrypted credential store. Access tokens are renewed automatically.
+On the Shop Sync page, enter the app's keystring and shared secret, then select **Connect Etsy**. Approve the official Etsy consent screen with `listings_r`, `listings_w`, and `shops_r`, copy the authorization result from the Shop Sync callback page, and paste it into **Authorization result**. Shop Sync validates the state and PKCE verifier, exchanges the one-use code directly with Etsy, discovers the Shop ID, and stores the resulting credentials in its encrypted credential store. Access tokens are renewed automatically.
+
+### Import the Shopify master catalogue and review duplicates
+
+1. Connect Shopify, Etsy and/or eBay as described above.
+2. Select each applicable button under **Import catalogues**. Re-importing refreshes existing records rather than creating another stored copy.
+3. Check **Review duplicate titles**. A match ignores capitalisation, punctuation and repeated spaces.
+4. Confirm that the similarly named records really are separate products before selecting **Approve for Shopify**.
+5. Approval applies only to that source listing and destination. Future Etsy and eBay exporters use separate approvals, so an approval cannot leak between marketplaces.
+
+Duplicate checks are also enforced by the API. Unreviewed duplicates cannot be submitted through the single-item or bulk Shopify draft endpoints.
 
 The GitHub repository must have Pages enabled from the `/docs` folder on the `main` branch for the HTTPS callback to load.
 

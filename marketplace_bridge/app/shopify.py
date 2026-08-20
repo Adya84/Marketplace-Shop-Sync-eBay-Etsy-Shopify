@@ -6,6 +6,8 @@ import uuid
 
 import httpx
 
+from .models import Image, OptionValue, Product, Variant
+
 
 PRODUCT_SET = """
 mutation ProductSet($input: ProductSetInput!, $identifier: ProductSetIdentifiers, $synchronous: Boolean!) {
@@ -64,6 +66,24 @@ query CurrentInventory($inventoryItemId: ID!, $locationId: ID!) {
 """
 
 LOCATION_QUERY = "{ locations(first: 1) { nodes { id name } } }"
+
+PRODUCTS_QUERY = """
+query ShopSyncProducts($cursor: String) {
+  products(first: 50, after: $cursor) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id legacyResourceId title descriptionHtml status vendor productType tags handle
+      featuredMedia { preview { image { url altText } } }
+      media(first: 100) { nodes { preview { image { url altText } } } }
+      variants(first: 250) {
+        nodes { id legacyResourceId title sku barcode price inventoryQuantity selectedOptions { name value }
+          image { url altText }
+        }
+      }
+    }
+  }
+}
+"""
 
 
 class ShopifyClient:
@@ -130,6 +150,43 @@ class ShopifyClient:
     async def test(self):
         data = await self.graphql("{ shop { name myshopifyDomain } }")
         return data["shop"]
+
+    async def list_products(self) -> list[Product]:
+        products = []
+        cursor = None
+        while True:
+            data = await self.graphql(PRODUCTS_QUERY, {"cursor": cursor})
+            connection = data["products"]
+            for item in connection["nodes"]:
+                images = []
+                seen = set()
+                for position, media in enumerate(item["media"]["nodes"], 1):
+                    image = (media.get("preview") or {}).get("image") or {}
+                    url = image.get("url")
+                    if url and url not in seen:
+                        seen.add(url)
+                        images.append(Image(url=url, position=position, alt=image.get("altText") or item["title"]))
+                variants = []
+                for variant in item["variants"]["nodes"]:
+                    variants.append(Variant(
+                        source_id=str(variant.get("legacyResourceId") or variant["id"]),
+                        sku=variant.get("sku") or f"shopify-{variant.get('legacyResourceId')}",
+                        price=str(variant.get("price") or "0.00"),
+                        quantity=int(variant.get("inventoryQuantity") or 0),
+                        options=[OptionValue(name=o["name"], value=o["value"]) for o in variant.get("selectedOptions", []) if o["name"] != "Title"],
+                        barcode=variant.get("barcode") or None,
+                        image_url=(variant.get("image") or {}).get("url"),
+                    ))
+                products.append(Product(
+                    source="shopify", source_id=str(item["legacyResourceId"]), title=item["title"],
+                    description_html=item.get("descriptionHtml") or "", status=str(item.get("status") or "").lower(),
+                    currency="", vendor=item.get("vendor") or "", product_type=item.get("productType") or "",
+                    tags=item.get("tags") or [], images=images, variants=variants,
+                    source_url=f"https://{self.domain}/admin/products/{item['legacyResourceId']}", raw=item,
+                ))
+            if not connection["pageInfo"]["hasNextPage"]:
+                return products
+            cursor = connection["pageInfo"]["endCursor"]
 
     async def create_draft(self, product: dict):
         option_names = []

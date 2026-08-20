@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -43,7 +45,19 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS duplicate_approvals (
+  source TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  destination TEXT NOT NULL,
+  approved_at TEXT NOT NULL,
+  PRIMARY KEY(source, source_id, destination)
+);
 """
+
+
+def normalized_title(value: str) -> str:
+    value = unicodedata.normalize("NFKC", value).casefold()
+    return " ".join(re.sub(r"[^\w]+", " ", value).split())
 
 
 def now() -> str:
@@ -92,12 +106,39 @@ class Database:
 
     def list_products(self):
         with self.connect() as conn:
-            return [dict(row) for row in conn.execute(
+            products = [dict(row) for row in conn.execute(
                 """SELECT p.id,p.source,p.source_id,p.title,p.updated_at,
                 m.destination_id AS shopify_id FROM products p LEFT JOIN mappings m
                 ON m.source=p.source AND m.source_id=p.source_id AND m.destination='shopify'
                 ORDER BY p.updated_at DESC"""
             )]
+            approvals = {
+                (row["source"], row["source_id"], row["destination"])
+                for row in conn.execute("SELECT source,source_id,destination FROM duplicate_approvals")
+            }
+        counts = {}
+        for product in products:
+            key = normalized_title(product["title"])
+            counts[key] = counts.get(key, 0) + 1
+        for product in products:
+            product["normalized_title"] = normalized_title(product["title"])
+            product["is_duplicate"] = counts[product["normalized_title"]] > 1
+            product["duplicate_approved_shopify"] = (product["source"], product["source_id"], "shopify") in approvals
+            product["duplicate_approved_etsy"] = (product["source"], product["source_id"], "etsy") in approvals
+            product["duplicate_approved_ebay"] = (product["source"], product["source_id"], "ebay") in approvals
+        return products
+
+    def duplicate_is_blocked(self, source: str, source_id: str, destination: str) -> bool:
+        products = self.list_products()
+        product = next((p for p in products if p["source"] == source and p["source_id"] == source_id), None)
+        return bool(product and product["is_duplicate"] and not product.get(f"duplicate_approved_{destination}"))
+
+    def approve_duplicate(self, source: str, source_id: str, destination: str):
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO duplicate_approvals VALUES (?, ?, ?, ?)",
+                (source, source_id, destination, now()),
+            )
 
     def get_product(self, source: str, source_id: str) -> dict | None:
         with self.connect() as conn:
