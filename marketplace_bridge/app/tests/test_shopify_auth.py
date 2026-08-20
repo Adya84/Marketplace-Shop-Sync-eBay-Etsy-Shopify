@@ -21,7 +21,7 @@ def test_accepts_client_credentials():
 
 
 def test_dashboard_submits_connections_through_ingress_path():
-    html = render_dashboard([], [], False, False)
+    html = render_dashboard([], [], False, False, False)
 
     assert 'onsubmit="connect(event)"' in html
     assert "location.pathname.endsWith('/')" in html
