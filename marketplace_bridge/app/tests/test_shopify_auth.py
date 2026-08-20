@@ -1,6 +1,7 @@
 import pytest
 
 from app.shopify import ShopifyClient
+from app.main import render_dashboard
 
 
 def test_requires_myshopify_domain():
@@ -18,4 +19,13 @@ def test_accepts_client_credentials():
     assert client.domain == "store.myshopify.com"
     assert client.token_endpoint == "https://store.myshopify.com/admin/oauth/access_token"
 
+
+def test_dashboard_submits_connections_through_ingress_path():
+    html = render_dashboard([], [], False, False)
+
+    assert 'onsubmit="connect(event)"' in html
+    assert "location.pathname.endsWith('/')" in html
+    assert "fetch(endpoint(form.getAttribute('action'))" in html
+    assert 'action="api/settings/shopify"' in html
+    assert 'action="api/settings/ebay"' in html
 

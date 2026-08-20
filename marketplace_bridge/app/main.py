@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 
 from .db import Database
 from .ebay import EbayClient
@@ -37,7 +37,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.3", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.4", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -60,7 +60,7 @@ async def configure_ebay(access_token: str = Form(...)):
     client = EbayClient(access_token, settings.ebay_environment)
     await client.list_active_ids()  # Validates token before storage.
     save_credentials("ebay", {"access_token": access_token})
-    return RedirectResponse("./", status_code=303)
+    return {"connected": True}
 
 
 @app.post("/api/settings/shopify")
@@ -77,7 +77,7 @@ async def configure_shopify(shop_domain: str = Form(...), client_id: str = Form(
         "client_id": client_id,
         "client_secret": client_secret,
     })
-    return RedirectResponse("./", status_code=303)
+    return {"connected": True, "shop": shop["name"]}
 
 
 @app.post("/api/import/ebay")
@@ -160,13 +160,29 @@ def render_dashboard(products, jobs, ebay_connected, shopify_connected):
     @media(max-width:650px){{main{{padding:16px}}.hero{{display:block}}table{{display:block;overflow:auto}}}}
     </style></head><body><main><div class="hero"><div><h1>Shop Sync</h1><p>Move complete listings between your marketplaces</p></div><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button></div>
     <div class="grid"><section class="card"><h2>eBay UK</h2><div class="status"><i class="dot {'ok' if ebay_connected else ''}"></i>{'Connected' if ebay_connected else 'Not connected'}</div>
-    <form method="post" action="api/settings/ebay"><label>Production user access token</label><input name="access_token" type="password" required autocomplete="off"><button>Test and save</button></form></section>
+    <form method="post" action="api/settings/ebay" onsubmit="connect(event)"><label>Production user access token</label><input name="access_token" type="password" required autocomplete="off"><button>Test and save</button></form></section>
     <section class="card"><h2>Shopify</h2><div class="status"><i class="dot {'ok' if shopify_connected else ''}"></i>{'Connected' if shopify_connected else 'Not connected'}</div>
-    <form method="post" action="api/settings/shopify"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
+    <form method="post" action="api/settings/shopify" onsubmit="connect(event)"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
     <section class="card"><h2>Products</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="3">Import listings from eBay to begin.</td></tr>'}</tbody></table></section>
     <section class="card"><h2>Activity</h2><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
     <script>
-    async function send(path){{let r=await fetch(path,{{method:'POST'}});if(!r.ok)alert(await r.text());else{{setTimeout(()=>location.reload(),800)}}}}
+    function endpoint(path){{
+      const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
+      const action=path.startsWith('/')?path.slice(1):path;
+      return base+action;
+    }}
+    async function connect(event){{
+      event.preventDefault();
+      const form=event.currentTarget;
+      const button=form.querySelector('button');
+      button.disabled=true; button.textContent='Testing...';
+      try{{
+        const response=await fetch(endpoint(form.getAttribute('action')),{{method:'POST',body:new FormData(form)}});
+        if(!response.ok)throw new Error(await response.text());
+        location.reload();
+      }}catch(error){{alert(error.message); button.disabled=false; button.textContent='Test and save'}}
+    }}
+    async function send(path){{let r=await fetch(endpoint(path),{{method:'POST'}});if(!r.ok)alert(await r.text());else{{setTimeout(()=>location.reload(),800)}}}}
     function formHasData(){{return [...document.querySelectorAll('input')].some(input => input.value.length > 0)}}
     setTimeout(()=>{{if(!formHasData())location.reload()}},10000)
     </script></main></body></html>'''
