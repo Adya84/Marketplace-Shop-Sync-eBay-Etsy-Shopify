@@ -1,11 +1,11 @@
 # Shop Sync: eBay, Etsy and Shopify
 
-Shop Sync is an early-stage Home Assistant OS add-on for transferring marketplace listings. Version `0.0.2` implements the first route: **eBay UK to Shopify**, with Shopify intended to become the catalogue master.
+Shop Sync is an early-stage Home Assistant OS add-on for transferring marketplace listings. Version `0.0.3` implements the first route: **eBay UK to Shopify**, with Shopify intended to become the catalogue master.
 
 > [!IMPORTANT]
 > This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation, Etsy support and multi-user onboarding are not implemented yet.
 
-## What version 0.0.2 does
+## What version 0.0.3 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -16,6 +16,7 @@ Shop Sync is an early-stage Home Assistant OS add-on for transferring marketplac
 - Stores eBay-to-Shopify product and variant mappings for later reconciliation.
 - Shows connections, imported products, transfer actions and job activity on a Home Assistant Ingress page called **Shop Sync**.
 - Uses Shopify client credentials to obtain and renew short-lived Admin API tokens automatically.
+- Preserves partially entered connection forms instead of refreshing and clearing them.
 
 ## Not implemented yet
 
@@ -28,7 +29,7 @@ Shop Sync is an early-stage Home Assistant OS add-on for transferring marketplac
 - Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The interface may refer to broader marketplace transfers because those routes are planned, but only eBay UK to Shopify is available in `0.0.2`.
+The interface may refer to broader marketplace transfers because those routes are planned, but only eBay UK to Shopify is available in `0.0.3`.
 
 ## Install in Home Assistant OS
 
@@ -49,7 +50,7 @@ Shop Sync is distributed as a Home Assistant custom add-on, not through HACS. It
 
 ## Connect eBay
 
-Version `0.0.2` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
+Version `0.0.3` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
 
 Enter the token on the Shop Sync page and select **Test and save**. The add-on validates it by requesting the account's active listings before storing it.
 
