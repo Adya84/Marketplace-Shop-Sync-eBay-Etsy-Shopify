@@ -1,4 +1,4 @@
-# Shop Sync: eBay, Etsy and Shopify
+# Shop Sync: eBay, Etsy, TikTok Shop and Shopify
 
 [![Licence](https://img.shields.io/badge/licence-Shop%20Sync%20Personal%20%26%20Store%20Use-red.svg)](LICENSE)
 
@@ -6,12 +6,12 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.18` implements **eBay UK or Etsy to Shopify**, with Shopify intended to become the catalogue master.
+Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.20` implements **eBay UK, Etsy or TikTok Shop to Shopify**, imports the Shopify master catalogue, and adds destination-specific duplicate-title review.
 
 > [!IMPORTANT]
 > This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation and multi-user onboarding are not implemented yet.
 
-## What version 0.0.18 does
+## What version 0.0.20 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -25,12 +25,16 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Preserves partially entered connection forms instead of refreshing and clearing them.
 - Submits connections and actions through the correct Home Assistant Ingress path.
 - Imports active Etsy listings through Open API v3, including descriptions, images, variations, SKUs, prices and quantities.
+- Imports active TikTok Shop listings, including descriptions, images, variations, SKUs, prices and quantities.
 - Renews Etsy OAuth access tokens automatically when a refresh token is available.
 - Guides Etsy sign-in with PKCE, validates single-use state and discovers the authorised Shop ID automatically.
 - Provides an optional **Buy me a beer** button linked directly to the Graffidoodle PayPal page.
 - Displays an Adrian Apel copyright notice and links to the Shop Sync licence.
 - Allows multiple imported products to be selected and queued as Shopify drafts together.
 - Moves successfully created Shopify drafts from **Ready to send** into a separate **Completed** section.
+- Imports the Shopify product catalogue so it can be used as the master comparison source and prepared for Shopify-to-marketplace transfers.
+- Detects duplicate titles across imported Etsy, eBay and Shopify catalogues after ignoring case, punctuation and repeated spacing.
+- Holds duplicate candidates in **Review duplicate titles** and excludes them from individual and bulk draft creation until approved for that destination.
 - Refreshes Activity automatically every 60 seconds without reloading connection forms.
 
 ## Not implemented yet
@@ -44,7 +48,18 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The available import routes in `0.0.18` are eBay UK to Shopify and Etsy to Shopify.
+The available draft creation routes in `0.0.20` are eBay UK, Etsy and TikTok Shop to Shopify. Shopify catalogue import and shared duplicate review are included; Shopify-to-marketplace draft creation remains planned work.
+
+### TikTok Shop connection
+
+1. Create a TikTok Shop app in TikTok Shop Partner Center and request `seller.authorization.info` and `seller.product.basic`.
+2. Complete TikTok's app review. A development app can only authorise development shops; a live seller shop cannot connect until TikTok approves and publishes the app.
+3. Authorise the seller shop and obtain its seller access token.
+4. Run **Get Authorized Shops** in TikTok's API testing tool and copy the selected shop's `cipher` value.
+5. In Shop Sync, enter the app key, app secret, seller access token and shop cipher, then select **Test and save**.
+6. Select **Import TikTok Shop listings**. TikTok products then use the existing duplicate-title review and Shopify draft workflow.
+
+TikTok credentials are encrypted in Shop Sync's local data directory. Never paste an app secret or access token into chat, screenshots, issues or logs. Seller access tokens expire; save a current token if a later import reports an authentication error.
 
 ## Complete setup guide
 
@@ -103,7 +118,7 @@ If Shopify scopes are changed later, releasing a version is not enough. Uninstal
 4. Save the callback URL.
 5. Copy the Etsy app's **keystring** and **shared secret**. Keep them private.
 6. In Home Assistant, enter both values in the Etsy panel and select **Connect Etsy**.
-7. Approve the official Etsy consent screen. Shop Sync requests only `listings_r` and `shops_r` for the current Etsy import route.
+7. Approve the official Etsy consent screen. Shop Sync requests `listings_r`, `listings_w`, and `shops_r`; write access is needed for the upcoming Shopify-to-Etsy draft route. Existing users must reconnect Etsy once after installing 0.0.19 to grant the added scope.
 8. On the **Etsy approved** callback page, select **Copy authorization result**.
 9. Return to Home Assistant, paste it into **Authorization result**, and select **Finish Etsy connection**.
 
@@ -148,7 +163,7 @@ If Home Assistant still shows the installed and latest versions as identical, re
 
 ## Connect eBay
 
-Version `0.0.18` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
+Version `0.0.19` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
 
 Enter the token on the Shop Sync page and select **Test and save**. The app validates it by requesting the account's active listings before storing it.
 
@@ -178,7 +193,17 @@ Create an Etsy Open API v3 Seller App and add this exact redirect URI to its set
 https://adya84.github.io/Marketplace-Shop-Sync-eBay-Etsy-Shopify/etsy-callback.html
 ```
 
-On the Shop Sync page, enter the app's keystring and shared secret, then select **Connect Etsy**. Approve the official Etsy consent screen with `listings_r` and `shops_r`, copy the authorization result from the Shop Sync callback page, and paste it into **Authorization result**. Shop Sync validates the state and PKCE verifier, exchanges the one-use code directly with Etsy, discovers the Shop ID, and stores the resulting credentials in its encrypted credential store. Access tokens are renewed automatically.
+On the Shop Sync page, enter the app's keystring and shared secret, then select **Connect Etsy**. Approve the official Etsy consent screen with `listings_r`, `listings_w`, and `shops_r`, copy the authorization result from the Shop Sync callback page, and paste it into **Authorization result**. Shop Sync validates the state and PKCE verifier, exchanges the one-use code directly with Etsy, discovers the Shop ID, and stores the resulting credentials in its encrypted credential store. Access tokens are renewed automatically.
+
+### Import the Shopify master catalogue and review duplicates
+
+1. Connect Shopify, Etsy and/or eBay as described above.
+2. Select each applicable button under **Import catalogues**. Re-importing refreshes existing records rather than creating another stored copy.
+3. Check **Review duplicate titles**. A match ignores capitalisation, punctuation and repeated spaces.
+4. Confirm that the similarly named records really are separate products before selecting **Approve for Shopify**.
+5. Approval applies only to that source listing and destination. Future Etsy and eBay exporters use separate approvals, so an approval cannot leak between marketplaces.
+
+Duplicate checks are also enforced by the API. Unreviewed duplicates cannot be submitted through the single-item or bulk Shopify draft endpoints.
 
 The GitHub repository must have Pages enabled from the `/docs` folder on the `main` branch for the HTTPS callback to load.
 
