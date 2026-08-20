@@ -1,4 +1,4 @@
-# Shop Sync: eBay, Etsy and Shopify
+# Shop Sync: eBay, Etsy, TikTok Shop and Shopify
 
 [![Licence](https://img.shields.io/badge/licence-Shop%20Sync%20Personal%20%26%20Store%20Use-red.svg)](LICENSE)
 
@@ -6,12 +6,12 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.19` implements **eBay UK or Etsy to Shopify**, imports the Shopify master catalogue, and adds destination-specific duplicate-title review.
+Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.20` implements **eBay UK, Etsy or TikTok Shop to Shopify**, imports the Shopify master catalogue, and adds destination-specific duplicate-title review.
 
 > [!IMPORTANT]
 > This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation and multi-user onboarding are not implemented yet.
 
-## What version 0.0.19 does
+## What version 0.0.20 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -25,6 +25,7 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Preserves partially entered connection forms instead of refreshing and clearing them.
 - Submits connections and actions through the correct Home Assistant Ingress path.
 - Imports active Etsy listings through Open API v3, including descriptions, images, variations, SKUs, prices and quantities.
+- Imports active TikTok Shop listings, including descriptions, images, variations, SKUs, prices and quantities.
 - Renews Etsy OAuth access tokens automatically when a refresh token is available.
 - Guides Etsy sign-in with PKCE, validates single-use state and discovers the authorised Shop ID automatically.
 - Provides an optional **Buy me a beer** button linked directly to the Graffidoodle PayPal page.
@@ -47,7 +48,18 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The available draft creation routes in `0.0.19` are eBay UK to Shopify and Etsy to Shopify. Shopify catalogue import and shared duplicate review are now included; Shopify-to-Etsy and Shopify-to-eBay draft creation are the next routes.
+The available draft creation routes in `0.0.20` are eBay UK, Etsy and TikTok Shop to Shopify. Shopify catalogue import and shared duplicate review are included; Shopify-to-marketplace draft creation remains planned work.
+
+### TikTok Shop connection
+
+1. Create a TikTok Shop app in TikTok Shop Partner Center and request `seller.authorization.info` and `seller.product.basic`.
+2. Complete TikTok's app review. A development app can only authorise development shops; a live seller shop cannot connect until TikTok approves and publishes the app.
+3. Authorise the seller shop and obtain its seller access token.
+4. Run **Get Authorized Shops** in TikTok's API testing tool and copy the selected shop's `cipher` value.
+5. In Shop Sync, enter the app key, app secret, seller access token and shop cipher, then select **Test and save**.
+6. Select **Import TikTok Shop listings**. TikTok products then use the existing duplicate-title review and Shopify draft workflow.
+
+TikTok credentials are encrypted in Shop Sync's local data directory. Never paste an app secret or access token into chat, screenshots, issues or logs. Seller access tokens expire; save a current token if a later import reports an authentication error.
 
 ## Complete setup guide
 
@@ -246,3 +258,4 @@ Use [GitHub Issues](https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Sh
 Copyright (C) 2026 Adrian Apel. All rights reserved.
 
 Shop Sync is provided under the [Shop Sync Home Assistant App Licence](LICENSE). It can be used free of charge on your own Home Assistant installation to manage marketplace accounts and stores you own or are authorised to operate. Redistribution, rebranding, resale, publication of modified versions, paid hosting and inclusion in paid products or services require prior written permission.
+
