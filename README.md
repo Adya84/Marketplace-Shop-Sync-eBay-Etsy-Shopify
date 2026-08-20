@@ -4,12 +4,12 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.5` implements the first route: **eBay UK to Shopify**, with Shopify intended to become the catalogue master.
+Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.6` implements **eBay UK or Etsy to Shopify**, with Shopify intended to become the catalogue master.
 
 > [!IMPORTANT]
-> This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation, Etsy support and multi-user onboarding are not implemented yet.
+> This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation and multi-user onboarding are not implemented yet.
 
-## What version 0.0.5 does
+## What version 0.0.6 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -22,19 +22,21 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Uses Shopify client credentials to obtain and renew short-lived Admin API tokens automatically.
 - Preserves partially entered connection forms instead of refreshing and clearing them.
 - Submits connections and actions through the correct Home Assistant Ingress path.
+- Imports active Etsy listings through Open API v3, including descriptions, images, variations, SKUs, prices and quantities.
+- Renews Etsy OAuth access tokens automatically when a refresh token is available.
 
 ## Not implemented yet
 
 - Automatic Shopify-to-eBay stock updates
 - eBay order ingestion or automatic stock deductions
 - Bulk Shopify export/approval
-- Etsy import or export
+- Etsy export and Shopify-to-Etsy transfer
 - Shopify-to-eBay transfer
 - Scheduled reconciliation, webhooks and automatic retries
 - Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The interface may refer to broader marketplace transfers because those routes are planned, but only eBay UK to Shopify is available in `0.0.5`.
+The available import routes in `0.0.6` are eBay UK to Shopify and Etsy to Shopify.
 
 ## Install in Home Assistant OS
 
@@ -55,7 +57,7 @@ Shop Sync is distributed as a Home Assistant custom add-on, not through HACS. It
 
 ## Connect eBay
 
-Version `0.0.5` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
+Version `0.0.6` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
 
 Enter the token on the Shop Sync page and select **Test and save**. The add-on validates it by requesting the account's active listings before storing it.
 
@@ -77,10 +79,16 @@ Then provide:
 
 Shop Sync exchanges these credentials directly with the store's official token endpoint. It caches the returned access token in memory and requests a replacement before expiry. The generated access token is not stored in the database. Shop Sync tests the connection by reading the store identity before saving the credentials.
 
+## Connect Etsy
+
+Create an Etsy Open API v3 application and authorise it for the seller with `listings_r` and `shops_r`. Enter its API keystring, shared secret, numeric Shop ID, OAuth access token and refresh token on the Shop Sync page. Credentials and tokens are stored in the app's encrypted credential store; access tokens are renewed automatically.
+
+Etsy requires an approved API application and an HTTPS OAuth callback. Guided PKCE sign-in and the hosted callback service are planned for the public multi-user release. Version `0.0.6` accepts credentials produced by Etsy's official OAuth flow.
+
 ## Transfer a listing
 
-1. Connect eBay and Shopify.
-2. Select **Import eBay listings** and monitor the Activity table.
+1. Connect eBay or Etsy and Shopify.
+2. Select the matching **Import** button and monitor the Activity table.
 3. Review the imported products in Shop Sync.
 4. Select **Create Shopify draft** for the required listing.
 5. Review the resulting product, photos, variants, price and inventory in Shopify before publishing it.
@@ -111,11 +119,11 @@ The repository root is a Home Assistant custom add-on repository. The installabl
 
 ## Roadmap
 
-1. Guided eBay OAuth with token refresh
+1. Guided eBay and Etsy OAuth with hosted callback support
 2. Preview and validation before Shopify export
 3. Bulk draft creation, rate limiting and retries
 4. Shopify-master stock reconciliation and eBay order ingestion
-5. Etsy connector and additional transfer directions
+5. Etsy export and additional transfer directions
 6. Multi-merchant OAuth, tenant isolation and onboarding
 7. Optional HACS companion exposing Home Assistant entities and actions
 

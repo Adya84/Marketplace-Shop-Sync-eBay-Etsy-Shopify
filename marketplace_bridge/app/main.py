@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 
 from .db import Database
 from .ebay import EbayClient
+from .etsy import EtsyClient
 from .security import SecretBox
 from .settings import settings
 from .shopify import ShopifyClient
@@ -37,7 +38,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.5", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.6", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -49,6 +50,7 @@ def health():
 def status():
     return {
         "ebay_connected": db.get_credential("ebay") is not None,
+        "etsy_connected": db.get_credential("etsy") is not None,
         "shopify_connected": db.get_credential("shopify") is not None,
         "products": len(db.list_products()),
         "jobs": db.list_jobs(10),
@@ -61,6 +63,20 @@ async def configure_ebay(access_token: str = Form(...)):
     await client.list_active_ids()  # Validates token before storage.
     save_credentials("ebay", {"access_token": access_token})
     return {"connected": True}
+
+
+@app.post("/api/settings/etsy")
+async def configure_etsy(
+    keystring: str = Form(...),
+    shared_secret: str = Form(...),
+    shop_id: str = Form(...),
+    access_token: str = Form(...),
+    refresh_token: str = Form(""),
+):
+    client = EtsyClient(keystring, shared_secret, shop_id, access_token, refresh_token)
+    shop = await client.test()
+    save_credentials("etsy", client.credential_payload())
+    return {"connected": True, "shop": shop.get("shop_name", shop_id)}
 
 
 @app.post("/api/settings/shopify")
@@ -88,6 +104,14 @@ def import_ebay(background_tasks: BackgroundTasks):
     return {"job_id": job_id}
 
 
+@app.post("/api/import/etsy")
+def import_etsy(background_tasks: BackgroundTasks):
+    get_credentials("etsy")
+    job_id = db.create_job("etsy_import")
+    background_tasks.add_task(run_etsy_import, job_id)
+    return {"job_id": job_id}
+
+
 async def run_ebay_import(job_id: int):
     try:
         db.update_job(job_id, status="running", message="Reading active eBay listings")
@@ -102,6 +126,25 @@ async def run_ebay_import(job_id: int):
         db.update_job(job_id, status="complete", message=f"Imported {len(ids)} listings")
     except Exception as exc:
         log.exception("eBay import failed")
+        db.update_job(job_id, status="failed", message=str(exc)[:500])
+
+
+async def run_etsy_import(job_id: int):
+    try:
+        db.update_job(job_id, status="running", message="Reading active Etsy listings")
+        credential = get_credentials("etsy")
+        client = EtsyClient(**credential)
+        ids = await client.list_active_ids()
+        save_credentials("etsy", client.credential_payload())
+        db.update_job(job_id, total=len(ids), message=f"Found {len(ids)} listings")
+        for index, listing_id in enumerate(ids, 1):
+            product = await client.get_product(listing_id)
+            db.save_product(product)
+            save_credentials("etsy", client.credential_payload())
+            db.update_job(job_id, progress=index, message=f"Imported {product.title}")
+        db.update_job(job_id, status="complete", message=f"Imported {len(ids)} listings")
+    except Exception as exc:
+        log.exception("Etsy import failed")
         db.update_job(job_id, status="failed", message=str(exc)[:500])
 
 
@@ -139,15 +182,16 @@ def dashboard():
     products = db.list_products()
     jobs = db.list_jobs()
     ebay_connected = db.get_credential("ebay") is not None
+    etsy_connected = db.get_credential("etsy") is not None
     shopify_connected = db.get_credential("shopify") is not None
-    return HTMLResponse(render_dashboard(products, jobs, ebay_connected, shopify_connected))
+    return HTMLResponse(render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected))
 
 
-def render_dashboard(products, jobs, ebay_connected, shopify_connected):
+def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected):
     esc = __import__("html").escape
-    product_rows = "".join(f'''<tr><td>{esc(p['title'])}<small>eBay {esc(p['source_id'])}</small></td>
+    product_rows = "".join(f'''<tr><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
       <td><span class="pill {'ok' if p['shopify_id'] else ''}">{'Linked' if p['shopify_id'] else 'Imported'}</span></td>
-      <td>{'' if p['shopify_id'] else f'<button onclick="send(\'api/products/ebay/{p["source_id"]}/shopify\')">Create Shopify draft</button>'}</td></tr>''' for p in products)
+      <td>{'' if p['shopify_id'] else f'<button onclick="send(\'api/products/{p["source"]}/{p["source_id"]}/shopify\')">Create Shopify draft</button>'}</td></tr>''' for p in products)
     job_rows = "".join(f"<tr><td>{esc(j['kind'].replace('_',' ').title())}</td><td>{esc(j['status'])}</td><td>{j['progress']}/{j['total']}</td><td>{esc(j['message'])}</td></tr>" for j in jobs)
     return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shop Sync</title>
     <style>
@@ -158,12 +202,15 @@ def render_dashboard(products, jobs, ebay_connected, shopify_connected):
     input{{width:100%;background:#09111e;color:var(--text);border:1px solid var(--line);padding:11px;border-radius:8px;margin:6px 0 12px}}button{{background:var(--blue);border:0;color:#04111e;font-weight:700;border-radius:8px;padding:10px 14px;cursor:pointer}}
     .status{{display:flex;gap:8px;align-items:center}}.dot{{width:10px;height:10px;background:#e85d75;border-radius:50%}}.dot.ok{{background:var(--green)}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px;border-top:1px solid var(--line)}}small{{display:block;margin-top:3px}}.pill{{background:#2d3b50;padding:4px 8px;border-radius:99px;font-size:12px}}.pill.ok{{background:#145c47;color:#9effd8}}
     @media(max-width:650px){{main{{padding:16px}}.hero{{display:block}}table{{display:block;overflow:auto}}}}
-    </style></head><body><main><div class="hero"><div><h1>Shop Sync</h1><p>Move complete listings between your marketplaces</p></div><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button></div>
+    </style></head><body><main><div class="hero"><div><h1>Shop Sync</h1><p>Move complete listings between your marketplaces</p></div></div>
     <div class="grid"><section class="card"><h2>eBay UK</h2><div class="status"><i class="dot {'ok' if ebay_connected else ''}"></i>{'Connected' if ebay_connected else 'Not connected'}</div>
     <form method="post" action="api/settings/ebay" onsubmit="connect(event)"><label>Production user access token</label><input name="access_token" type="password" required autocomplete="off"><button>Test and save</button></form></section>
+    <section class="card"><h2>Etsy</h2><div class="status"><i class="dot {'ok' if etsy_connected else ''}"></i>{'Connected' if etsy_connected else 'Not connected'}</div>
+    <form method="post" action="api/settings/etsy" onsubmit="connect(event)"><label>API keystring</label><input name="keystring" type="password" required autocomplete="off"><label>Shared secret</label><input name="shared_secret" type="password" required autocomplete="off"><label>Shop ID</label><input name="shop_id" required><label>OAuth access token</label><input name="access_token" type="password" required autocomplete="off"><label>OAuth refresh token</label><input name="refresh_token" type="password" autocomplete="off"><button>Test and save</button></form></section>
     <section class="card"><h2>Shopify</h2><div class="status"><i class="dot {'ok' if shopify_connected else ''}"></i>{'Connected' if shopify_connected else 'Not connected'}</div>
     <form method="post" action="api/settings/shopify" onsubmit="connect(event)"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
-    <section class="card"><h2>Products</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="3">Import listings from eBay to begin.</td></tr>'}</tbody></table></section>
+    <section class="card"><h2>Import</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button></section>
+    <section class="card"><h2>Products</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="3">Connect a marketplace and import listings to begin.</td></tr>'}</tbody></table></section>
     <section class="card"><h2>Activity</h2><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
     <script>
     function endpoint(path){{
