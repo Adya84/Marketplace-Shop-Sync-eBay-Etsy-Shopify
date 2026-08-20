@@ -45,7 +45,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.20", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.21", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -352,10 +352,10 @@ def dashboard():
     return HTMLResponse(render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected, tiktok_connected))
 
 
-def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected, tiktok_connected):
+def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_connected, tiktok_connected=False):
     esc = __import__("html").escape
-    pending = [p for p in products if p["source"] != "shopify" and not p["shopify_id"] and (not p["is_duplicate"] or p["duplicate_approved_shopify"])]
-    duplicate_review = [p for p in products if p["source"] != "shopify" and not p["shopify_id"] and p["is_duplicate"] and not p["duplicate_approved_shopify"]]
+    pending = [p for p in products if p["source"] != "shopify" and not p["shopify_id"] and (not p.get("is_duplicate", False) or p.get("duplicate_approved_shopify", False))]
+    duplicate_review = [p for p in products if p["source"] != "shopify" and not p["shopify_id"] and p.get("is_duplicate", False) and not p.get("duplicate_approved_shopify", False)]
     completed = [p for p in products if p["source"] != "shopify" and p["shopify_id"]]
     pending_rows = "".join(f'''<tr><td><input class="product-select" type="checkbox" value="{esc(p["source"])}:{esc(p["source_id"])}" aria-label="Select {esc(p["title"])}"></td><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
       <td><span class="pill">Imported</span></td>

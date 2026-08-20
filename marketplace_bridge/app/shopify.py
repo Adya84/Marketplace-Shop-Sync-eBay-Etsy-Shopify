@@ -188,29 +188,60 @@ class ShopifyClient:
                 return products
             cursor = connection["pageInfo"]["endCursor"]
 
-    async def create_draft(self, product: dict):
-        option_names = []
-        for variant in product["variants"]:
-            for option in variant["options"]:
-                if option["name"] not in option_names:
-                    option_names.append(option["name"])
+    @staticmethod
+    def _product_options_and_variants(source_variants: list[dict]):
+        """Build a complete ProductSet option matrix for every variant."""
+        option_names: list[str] = []
+        for variant in source_variants:
+            for option in variant.get("options") or []:
+                name = str(option.get("name") or "").strip()
+                if name and name not in option_names:
+                    option_names.append(name)
+
+        # Shopify still requires an option definition and option value when a
+        # simple product is submitted with its default variant.
+        if source_variants and not option_names:
+            option_names = ["Title"]
+
+        normalised: list[tuple[dict, dict[str, str]]] = []
+        for variant in source_variants:
+            supplied = {
+                str(option.get("name") or "").strip(): str(option.get("value") or "").strip()
+                for option in variant.get("options") or []
+                if str(option.get("name") or "").strip()
+            }
+            values = {
+                name: supplied.get(name) or ("Default Title" if name == "Title" else "Default")
+                for name in option_names
+            }
+            normalised.append((variant, values))
+
         product_options = []
         for position, name in enumerate(option_names, 1):
-            values = []
-            for variant in product["variants"]:
-                values.extend(o["value"] for o in variant["options"] if o["name"] == name)
-            product_options.append({"name": name, "position": position, "values": [{"name": value} for value in dict.fromkeys(values)]})
+            values = list(dict.fromkeys(option_values[name] for _, option_values in normalised))
+            product_options.append({
+                "name": name,
+                "position": position,
+                "values": [{"name": value} for value in values],
+            })
 
         variants = []
-        for variant in product["variants"]:
+        for variant, option_values in normalised:
             record = {
-                "sku": variant["sku"], "price": variant["price"],
-                "optionValues": [{"optionName": o["name"], "name": o["value"]} for o in variant["options"]],
+                "sku": variant["sku"],
+                "price": variant["price"],
+                "optionValues": [
+                    {"optionName": name, "name": option_values[name]} for name in option_names
+                ],
                 "inventoryItem": {"tracked": True},
             }
             if variant.get("barcode"):
                 record["barcode"] = variant["barcode"]
             variants.append(record)
+        return product_options, variants
+
+    async def create_draft(self, product: dict):
+        product_options, variants = self._product_options_and_variants(product["variants"])
         # A deterministic handle makes retries idempotent without requiring a
         # merchant-specific unique metafield definition.
         source_handle = f"shop-sync-{product['source']}-{product['source_id']}".lower()
