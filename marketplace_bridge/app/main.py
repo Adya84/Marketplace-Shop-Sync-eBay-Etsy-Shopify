@@ -37,7 +37,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.1", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.2", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -64,10 +64,19 @@ async def configure_ebay(access_token: str = Form(...)):
 
 
 @app.post("/api/settings/shopify")
-async def configure_shopify(shop_domain: str = Form(...), access_token: str = Form(...)):
-    client = ShopifyClient(shop_domain, access_token, settings.shopify_api_version)
+async def configure_shopify(shop_domain: str = Form(...), client_id: str = Form(...), client_secret: str = Form(...)):
+    client = ShopifyClient(
+        shop_domain,
+        settings.shopify_api_version,
+        client_id=client_id,
+        client_secret=client_secret,
+    )
     shop = await client.test()
-    save_credentials("shopify", {"shop_domain": shop["myshopifyDomain"], "access_token": access_token})
+    save_credentials("shopify", {
+        "shop_domain": shop["myshopifyDomain"],
+        "client_id": client_id,
+        "client_secret": client_secret,
+    })
     return RedirectResponse("./", status_code=303)
 
 
@@ -111,7 +120,12 @@ async def run_shopify_export(job_id: int, source: str, source_id: str):
         db.update_job(job_id, status="running", total=1, message="Creating Shopify draft")
         product = db.get_product(source, source_id)
         credential = get_credentials("shopify")
-        client = ShopifyClient(credential["shop_domain"], credential["access_token"], settings.shopify_api_version)
+        client = ShopifyClient(
+            credential["shop_domain"],
+            settings.shopify_api_version,
+            client_id=credential["client_id"],
+            client_secret=credential["client_secret"],
+        )
         created = await client.create_draft(product)
         db.save_mapping(source, source_id, "shopify", created["id"], {"variants": created["variants"]["nodes"]})
         db.update_job(job_id, status="complete", progress=1, message=f"Created Shopify draft: {created['title']}")
@@ -148,7 +162,7 @@ def render_dashboard(products, jobs, ebay_connected, shopify_connected):
     <div class="grid"><section class="card"><h2>eBay UK</h2><div class="status"><i class="dot {'ok' if ebay_connected else ''}"></i>{'Connected' if ebay_connected else 'Not connected'}</div>
     <form method="post" action="api/settings/ebay"><label>Production user access token</label><input name="access_token" type="password" required autocomplete="off"><button>Test and save</button></form></section>
     <section class="card"><h2>Shopify</h2><div class="status"><i class="dot {'ok' if shopify_connected else ''}"></i>{'Connected' if shopify_connected else 'Not connected'}</div>
-    <form method="post" action="api/settings/shopify"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Admin API token</label><input name="access_token" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
+    <form method="post" action="api/settings/shopify"><label>Store domain</label><input name="shop_domain" placeholder="store.myshopify.com" required><label>Client ID</label><input name="client_id" type="password" required autocomplete="off"><label>Client secret</label><input name="client_secret" type="password" required autocomplete="off"><button>Test and save</button></form></section></div>
     <section class="card"><h2>Products</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="3">Import listings from eBay to begin.</td></tr>'}</tbody></table></section>
     <section class="card"><h2>Activity</h2><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
     <script>async function send(path){{let r=await fetch(path,{{method:'POST'}});if(!r.ok)alert(await r.text());else{{setTimeout(()=>location.reload(),800)}}}};setTimeout(()=>location.reload(),10000)</script></main></body></html>'''

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import time
+
 import httpx
 
 
@@ -51,14 +54,60 @@ LOCATION_QUERY = "{ locations(first: 1) { nodes { id name } } }"
 
 
 class ShopifyClient:
-    def __init__(self, shop_domain: str, access_token: str, api_version: str):
+    def __init__(
+        self,
+        shop_domain: str,
+        api_version: str,
+        *,
+        client_id: str | None = None,
+        client_secret: str | None = None,
+        access_token: str | None = None,
+    ):
         domain = shop_domain.removeprefix("https://").rstrip("/")
+        if not domain.endswith(".myshopify.com"):
+            raise ValueError("Use the permanent store domain ending in .myshopify.com")
+        if not access_token and not (client_id and client_secret):
+            raise ValueError("Shopify client credentials are required")
+        self.domain = domain
         self.endpoint = f"https://{domain}/admin/api/{api_version}/graphql.json"
-        self.headers = {"X-Shopify-Access-Token": access_token, "Content-Type": "application/json"}
+        self.token_endpoint = f"https://{domain}/admin/oauth/access_token"
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self._access_token = access_token
+        self._expires_at = float("inf") if access_token else 0.0
+        self._token_lock = asyncio.Lock()
+
+    async def _token(self) -> str:
+        # Renew five minutes early so a long-running import cannot cross expiry.
+        if self._access_token and time.time() < self._expires_at - 300:
+            return self._access_token
+        async with self._token_lock:
+            if self._access_token and time.time() < self._expires_at - 300:
+                return self._access_token
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    self.token_endpoint,
+                    data={
+                        "grant_type": "client_credentials",
+                        "client_id": self.client_id,
+                        "client_secret": self.client_secret,
+                    },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                response.raise_for_status()
+            payload = response.json()
+            token = payload.get("access_token")
+            if not token:
+                raise RuntimeError("Shopify did not return an access token")
+            self._access_token = token
+            self._expires_at = time.time() + int(payload.get("expires_in", 3600))
+            return token
 
     async def graphql(self, query: str, variables=None):
+        token = await self._token()
+        headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=90) as client:
-            response = await client.post(self.endpoint, headers=self.headers, json={"query": query, "variables": variables or {}})
+            response = await client.post(self.endpoint, headers=headers, json={"query": query, "variables": variables or {}})
             response.raise_for_status()
         payload = response.json()
         if payload.get("errors"):
