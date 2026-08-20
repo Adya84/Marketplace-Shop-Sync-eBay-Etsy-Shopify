@@ -1,11 +1,15 @@
 # Shop Sync: eBay, Etsy and Shopify
 
-Shop Sync is an early-stage Home Assistant OS add-on for transferring marketplace listings. Version `0.0.4` implements the first route: **eBay UK to Shopify**, with Shopify intended to become the catalogue master.
+<p align="center">
+  <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
+</p>
+
+Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.5` implements the first route: **eBay UK to Shopify**, with Shopify intended to become the catalogue master.
 
 > [!IMPORTANT]
 > This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation, Etsy support and multi-user onboarding are not implemented yet.
 
-## What version 0.0.4 does
+## What version 0.0.5 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -30,7 +34,7 @@ Shop Sync is an early-stage Home Assistant OS add-on for transferring marketplac
 - Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The interface may refer to broader marketplace transfers because those routes are planned, but only eBay UK to Shopify is available in `0.0.4`.
+The interface may refer to broader marketplace transfers because those routes are planned, but only eBay UK to Shopify is available in `0.0.5`.
 
 ## Install in Home Assistant OS
 
@@ -51,7 +55,7 @@ Shop Sync is distributed as a Home Assistant custom add-on, not through HACS. It
 
 ## Connect eBay
 
-Version `0.0.4` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
+Version `0.0.5` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
 
 Enter the token on the Shop Sync page and select **Test and save**. The add-on validates it by requesting the account's active listings before storing it.
 
