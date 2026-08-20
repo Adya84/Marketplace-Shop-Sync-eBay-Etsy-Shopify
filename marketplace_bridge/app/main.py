@@ -44,7 +44,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.12", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.13", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -264,6 +264,7 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}}.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}}
     input{{width:100%;background:#09111e;color:var(--text);border:1px solid var(--line);padding:11px;border-radius:8px;margin:6px 0 12px}}button,.button-link{{background:var(--blue);border:0;color:#04111e;font-weight:700;border-radius:8px;padding:10px 14px;cursor:pointer;text-decoration:none;display:inline-block}}
     .status{{display:flex;gap:8px;align-items:center}}.dot{{width:10px;height:10px;background:#e85d75;border-radius:50%}}.dot.ok{{background:var(--green)}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px;border-top:1px solid var(--line)}}small{{display:block;margin-top:3px}}.pill{{background:#2d3b50;padding:4px 8px;border-radius:99px;font-size:12px}}.pill.ok{{background:#145c47;color:#9effd8}}
+    .footer{{text-align:center;color:var(--muted);font-size:12px;padding:10px 0 4px}}.footer a{{color:var(--muted)}}
     @media(max-width:650px){{main{{padding:16px}}.hero{{display:block}}table{{display:block;overflow:auto}}}}
     </style></head><body><main><div class="hero"><div><h1>Shop Sync</h1><p>Move complete listings between your marketplaces</p></div><a class="button-link" href="https://paypal.me/graffidoodle" target="_blank" rel="noopener noreferrer" aria-label="Buy me a beer">🍺 Buy me a beer</a></div>
     <div class="grid"><section class="card"><h2>eBay UK</h2><div class="status"><i class="dot {'ok' if ebay_connected else ''}"></i>{'Connected' if ebay_connected else 'Not connected'}</div>
@@ -276,6 +277,7 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     <section class="card"><h2>Import</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button></section>
     <section class="card"><h2>Products</h2><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{product_rows or '<tr><td colspan="3">Connect a marketplace and import listings to begin.</td></tr>'}</tbody></table></section>
     <section class="card"><div class="hero"><h2>Activity</h2><button onclick="clearActivity()">Clear activity</button></div><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody>{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table></section>
+    <footer class="footer">Copyright © 2026 Adrian Apel · All rights reserved · <a href="https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></footer>
     <script>
     function endpoint(path){{
       const base=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';

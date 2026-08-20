@@ -1,0 +1,112 @@
+Shop Sync Home Assistant App Licence
+
+Copyright (C) 2026 Adrian Apel
+
+All rights reserved.
+
+This software, including all source code, documentation, web interface files, images, configuration files and related materials, is the intellectual property of Adrian Apel.
+
+By downloading, installing, copying or using this software, you agree to the terms of this licence.
+
+## 1. Permission Granted
+
+Permission is granted to download, install and use this software free of charge for your own Home Assistant installation and for managing marketplace accounts and online stores that you own or are authorised to operate.
+
+You may fork this repository for personal testing, learning or development only, provided that the fork is not used to redistribute, rebrand, publish, sell or commercially exploit the software itself.
+
+## 2. Restrictions
+
+You may not, without prior written permission from Adrian Apel:
+
+* Sell this software.
+* Charge money for access to this software.
+* Redistribute this software in modified or unmodified form.
+* Publish modified versions of this software.
+* Rebrand, rename or claim ownership of this software.
+* Include this software in any paid product, service, bundle or package.
+* Use this software or any part of its source code in a competing commercial product or service.
+* Remove or alter copyright notices, author credits or attribution.
+* Upload copies of this software to other repositories, websites, app stores or distribution platforms.
+* Use this software to provide paid installation, support, hosting, marketplace management or managed services without permission.
+* Use the name, branding, screenshots or design of this project to imply endorsement, partnership or affiliation.
+
+This licence does not prohibit an authorised user from selling their own products through marketplace accounts connected to their own Shop Sync installation.
+
+## 3. Contributions
+
+Bug reports, suggestions and pull requests may be submitted to the official repository.
+
+By submitting a contribution, you grant Adrian Apel permission to use, modify, include and distribute that contribution as part of this project.
+
+Submission of a contribution does not give the contributor ownership of the project or permission to redistribute the project separately.
+
+## 4. Official Repository
+
+The official source repository is:
+
+https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify
+
+Users should download and install the software only from the official repository or approved Home Assistant installation methods linked to the official repository.
+
+## 5. No Affiliation
+
+This project is an independent Home Assistant app.
+
+It is not affiliated with, endorsed by, sponsored by or officially connected to Home Assistant, the Open Home Foundation, Shopify, Etsy or eBay.
+
+All trademarks, marketplace names, product names and logos remain the property of their respective owners.
+
+## 6. Marketplace Responsibility
+
+Users are responsible for reviewing transferred listings and complying with the terms, policies, fees, intellectual-property rules, product restrictions, tax requirements and other obligations of every connected marketplace and store.
+
+Shop Sync does not guarantee that data accepted by one marketplace will be valid, complete or permitted on another marketplace.
+
+## 7. Warranty Disclaimer
+
+This software is provided "as is", without warranty of any kind, express or implied.
+
+Adrian Apel makes no guarantees that the software will be error-free, secure, uninterrupted, compatible with all systems or marketplace APIs, or suitable for any particular purpose.
+
+Use of this software is entirely at your own risk.
+
+## 8. Limitation of Liability
+
+To the maximum extent permitted by law, Adrian Apel shall not be liable for any loss, damage, data loss, service interruption, account restriction, listing error, incorrect price, incorrect stock quantity, duplicate listing, marketplace fee, missed sale, financial loss or any other claim arising from the use of this software.
+
+## 9. Permission Requests
+
+For permission to redistribute, modify, use the software commercially, include it in another project, or provide paid services involving this software, written permission must be obtained from Adrian Apel.
+
+## 10. Termination
+
+Any breach of this licence automatically terminates your permission to use this software.
+
+Upon termination, you must stop using the software and delete any copies in your possession unless written permission is granted by Adrian Apel.
+
+## 11. Licence Changes
+
+Adrian Apel reserves the right to update or change this licence for future versions of the software.
+
+Existing versions remain governed by the licence terms included with that version at the time of release.
+
+## Summary
+
+You may:
+
+* Use Shop Sync free of charge on your own Home Assistant installation.
+* Use it to manage marketplace accounts and stores you own or are authorised to operate.
+* Fork it for personal testing only.
+* Submit issues, suggestions and pull requests.
+
+You may not:
+
+* Sell it.
+* Rebrand it.
+* Redistribute it.
+* Publish modified versions.
+* Offer it as a paid or hosted service.
+* Include it in paid software or services.
+* Claim it as your own.
+
+All rights not expressly granted are reserved by Adrian Apel.
