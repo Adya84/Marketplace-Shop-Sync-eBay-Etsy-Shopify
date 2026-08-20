@@ -48,3 +48,25 @@ def test_finds_shop_from_direct_etsy_response():
     shop = asyncio.run(client.find_authorised_shop())
 
     assert shop["shop_id"] == 987
+
+
+def test_product_fetches_images_and_inventory_separately():
+    class CurrentApiClient(EtsyClient):
+        def __init__(self):
+            super().__init__("key", "secret", "shop", "12345678.oauth-token")
+            self.calls = []
+
+        async def _get(self, path: str, params=None):
+            self.calls.append((path, params))
+            if path.endswith("/inventory"):
+                return SAMPLE["inventory"]
+            return {**SAMPLE, "inventory": None}
+
+    client = CurrentApiClient()
+    product = asyncio.run(client.get_product("123"))
+
+    assert client.calls == [
+        ("/v3/application/listings/123", {"includes": "Images"}),
+        ("/v3/application/listings/123/inventory", None),
+    ]
+    assert product.variants[0].sku == "SIGN-RED"
