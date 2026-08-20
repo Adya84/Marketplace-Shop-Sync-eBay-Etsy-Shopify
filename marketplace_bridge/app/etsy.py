@@ -125,7 +125,12 @@ class EtsyClient:
     async def get_product(self, listing_id: str) -> Product:
         listing = await self._get(
             f"/v3/application/listings/{listing_id}",
-            {"includes": "Images,Inventory"},
+            {"includes": "Images"},
+        )
+        # Etsy removed Inventory from getListing's includes parameter. Fetch
+        # the dedicated inventory resource and merge it for normalisation.
+        listing["inventory"] = await self._get(
+            f"/v3/application/listings/{listing_id}/inventory"
         )
         return self._normalise(listing)
 
