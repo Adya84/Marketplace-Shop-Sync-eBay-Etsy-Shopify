@@ -1,5 +1,5 @@
 name: Shop Sync
-version: "0.0.19"
+version: "0.0.20"
 slug: marketplace_bridge
 description: Transfer complete marketplace listings and keep Shopify as the catalogue master.
 url: https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify
@@ -32,3 +32,4 @@ ports:
   8099/tcp: null
 ports_description:
   8099/tcp: Direct web interface (Ingress is recommended)
+
