@@ -1,5 +1,17 @@
 # Shop Sync Changelog
 
+## 0.0.29
+
+- Added publisher-managed Etsy OAuth so normal users no longer need an Etsy developer app, keystring or shared secret.
+- Added Etsy PKCE (`S256`) authorization through the hosted Shop Sync OAuth broker.
+- Added hosted Etsy callback, authorization-code exchange and automatic refresh-token handling.
+- Added a broker-issued Etsy API credential so Etsy Open API reads can be proxied without exposing the publisher shared secret to Home Assistant users.
+- Added automatic discovery of the authorised Etsy Shop ID after connection.
+- Preserved compatibility with Etsy credentials created by earlier Shop Sync versions.
+- Removed Etsy keystring/shared-secret fields from the normal Shop Sync UI.
+- Switched the add-on runtime to `main_v4` and bumped the Home Assistant app version to `0.0.29`.
+- Updated the root README and OAuth broker README for the shared eBay + Etsy hosted OAuth architecture.
+
 ## 0.0.28
 
 - Added a LIVE Activity panel with current job/product message, progress, percentage, running/queued counts and last update time.

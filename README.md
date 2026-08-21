@@ -6,7 +6,9 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is a Home Assistant OS app for importing marketplace listings and creating Shopify drafts. Version `0.0.28` uses a simple eBay connection: **normal users do not need an eBay Developer account, App ID, Cert ID, RuName or manually generated eBay token**. They connect their own seller account through the publisher-managed Shop Sync eBay OAuth application.
+Shop Sync is a Home Assistant OS app for importing marketplace listings and creating Shopify drafts. Version `0.0.29` adds the same simple hosted OAuth experience for Etsy that Shop Sync already uses for eBay.
+
+Normal users do **not** need an eBay Developer account or an Etsy developer app. They connect their own seller accounts through the publisher-managed Shop Sync OAuth service.
 
 > [!IMPORTANT]
 > Shop Sync is still a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous order/stock synchronisation and reverse marketplace publishing are still planned work.
@@ -17,77 +19,50 @@ Shop Sync is a Home Assistant OS app for importing marketplace listings and crea
 
 - Home Assistant OS with custom Apps/Add-ons support.
 - This repository added to the Home Assistant App Store.
-- Shop Sync installed, started and optionally shown in the sidebar.
+- Shop Sync installed and started.
 
 ### eBay
 
-Normal users only need:
+Normal users only need an eBay seller account and permission to approve Shop Sync. They do **not** need App ID, Cert ID, RuName or a manually generated token.
 
-- An eBay account with the seller listings they want to import.
-- Permission to approve Shop Sync on that eBay account.
+### Etsy
 
-They **do not** need:
-
-- An eBay Developer Program account.
-- App ID / Client ID.
-- Cert ID / Client secret.
-- RuName.
-- A manually generated production user token.
+Normal users only need the Etsy seller account they want to connect. They do **not** need an Etsy API keystring, shared secret or developer application.
 
 ### Shopify
 
-For the destination Shopify store, the user currently needs to create/install a Shopify app with:
+For the destination Shopify store, create/install a Shopify app with:
 
 ```text
 write_products,write_inventory,read_locations
 ```
 
-They then enter the store's permanent `.myshopify.com` domain, Client ID and Client secret into Shop Sync.
-
-### Etsy
-
-Etsy currently still requires the shop owner to create an Etsy developer app and supply its keystring/shared secret. The callback URL is:
-
-```text
-https://adya84.github.io/Marketplace-Shop-Sync-eBay-Etsy-Shopify/etsy-callback.html
-```
+Then enter the permanent `.myshopify.com` domain, Client ID and Client secret into Shop Sync.
 
 ### TikTok Shop
 
-TikTok Shop currently requires the app key, app secret, seller access token and shop cipher from TikTok Shop Partner Center. A development app can only authorise development shops until TikTok approves the app for live use.
+TikTok Shop currently still requires the app key, app secret, seller access token and shop cipher from TikTok Shop Partner Center.
 
-## What version 0.0.28 does
+## What version 0.0.29 does
 
-- Imports active eBay UK listings using OAuth user consent.
-- Uses the publisher-managed Shop Sync eBay OAuth application for end-user sign-in.
-- Forces a fresh eBay login when **Connect eBay** is selected so the correct seller account can be chosen.
-- Removes all eBay developer credential fields from the normal user flow.
-- Stores each seller's eBay access/refresh credentials locally in the Shop Sync Home Assistant app data.
-- Renews short-lived eBay access tokens automatically through the hosted OAuth broker.
-- Imports eBay titles, HTML descriptions, category data, item specifics, photos, variations, SKUs, prices and available quantities.
-- Skips eBay listings that eBay has removed or made unavailable instead of aborting the whole catalogue import.
-- Reports how many removed/unavailable eBay listings were skipped when the import completes.
-- Adds catalogue pagination at 50 listings per page so large shops can browse the complete import.
-- Adds search by title, SKU or listing ID.
-- Adds marketplace filtering for eBay, Etsy, Shopify and TikTok.
-- Shows imported SKU, variant count and total available stock in the catalogue.
-- Preserves bulk selection and Shopify draft creation across the paginated catalogue.
-- Writes imported stock to Shopify when creating drafts and verifies the quantity after Shopify stores it.
-- Uses the source variant order as a fallback when Shopify does not immediately return the same SKU, preventing valid stock from silently becoming zero.
-- Retries Shopify variant-image linking when Shopify reports that newly uploaded media is not ready yet.
-- Adds a **LIVE Activity** panel showing the current job, current product/message, progress, percentage, running/queued counts and last update time.
-- Refreshes live Activity automatically every 2 seconds so long transfers no longer look frozen.
-- Keeps up to 5,000 recent activity jobs available to the UI instead of only showing the last few.
-- Adds Activity history pagination at 25 jobs per page with Previous/Next and page numbers.
-- Bulk Shopify transfers now use a parent progress job so the page can show `Creating X / total`, completed, failed and remaining counts while the transfer runs.
-- Keeps individual product failures visible in Activity while allowing the rest of a bulk transfer to continue.
-- Imports active Etsy listings through Open API v3 and renews Etsy OAuth tokens automatically.
-- Imports active TikTok Shop products.
-- Imports the Shopify catalogue for duplicate review and comparison.
-- Creates Shopify products as drafts, including variants, inventory and media where supported.
-- Provides duplicate-title review before draft creation.
-- Supports individual and bulk Shopify draft creation.
-- Shows connection state and background-job activity in Home Assistant Ingress.
+- Adds publisher-managed Etsy OAuth for normal users.
+- Removes Etsy API keystring/shared-secret fields from the normal Shop Sync UI.
+- Uses Etsy OAuth PKCE through the hosted Shop Sync broker.
+- Keeps the Etsy publisher keystring/shared secret only on the hosted broker.
+- Stores each seller's Etsy access/refresh credentials locally in their Shop Sync installation.
+- Renews Etsy access tokens automatically through the broker.
+- Routes Etsy Open API reads through the broker so the publisher shared secret is never shipped to Home Assistant users.
+- Preserves compatibility with existing Etsy connections created by older Shop Sync versions.
+- Keeps the publisher-managed eBay OAuth flow introduced earlier.
+- Imports active eBay UK listings and active Etsy listings.
+- Imports titles, descriptions, images, variations, SKUs, prices and available quantities where supported.
+- Skips removed/unavailable eBay listings instead of aborting a full import.
+- Provides catalogue pagination, title/SKU/listing-ID search and marketplace filtering.
+- Shows SKU, variant count and stock in the Ready to send catalogue.
+- Creates Shopify products as drafts and verifies inventory after writing it.
+- Retries temporary Shopify media-readiness errors.
+- Provides LIVE Activity with 2-second refresh, parent bulk-transfer progress and paginated job history.
+- Imports TikTok Shop products and the Shopify catalogue for comparison/duplicate review.
 
 ## Install Shop Sync in Home Assistant OS
 
@@ -99,7 +74,7 @@ TikTok Shop currently requires the app key, app secret, seller access token and 
    https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify
    ```
 
-4. Close the repository dialog and refresh the App Store if necessary.
+4. Refresh the App Store if necessary.
 5. Select **Shop Sync** and choose **Install**.
 6. Start Shop Sync.
 7. Enable **Start on boot**, **Watchdog**, **Auto update** and **Show in sidebar** as desired.
@@ -109,35 +84,42 @@ Shop Sync is a custom Home Assistant app, not a HACS integration.
 
 ## Updating an existing installation
 
-For users upgrading from `0.0.27` or earlier:
+For users upgrading from `0.0.28` or earlier:
 
 1. Open **Home Assistant > Settings > Apps > Shop Sync**.
 2. Refresh the custom app repository if Home Assistant does not immediately show the new version.
-3. Install/update to `0.0.28` or later.
+3. Update to `0.0.29` or later.
 4. Restart Shop Sync.
 5. Reopen the Shop Sync sidebar page.
 
-The old eBay App ID, Cert ID and RuName fields are no longer required for a normal eBay connection.
+After updating, the Etsy panel no longer asks for API keystring/shared secret. Existing old Etsy credentials remain supported, but reconnecting through the new hosted OAuth flow is recommended.
 
-## Connect eBay — normal user instructions
-
-Users installing Shop Sync do **not** need to register with the eBay Developer Program.
+## Connect eBay
 
 1. Open **Shop Sync**.
 2. Select **Connect eBay**.
-3. Shop Sync asks the hosted Shop Sync OAuth service for the official eBay sign-in URL.
-4. Sign in to the eBay seller account you want Shop Sync to access.
-5. If eBay displays the Shop Sync permission screen, review it and select **Agree and Continue**. eBay may reuse an existing grant for an account that has already approved Shop Sync.
-6. eBay redirects to the Shop Sync callback page.
-7. Select **Copy authorization result**.
-8. Return to Shop Sync.
-9. Paste the copied value into **Authorization result**.
-10. Select **Finish eBay connection**.
-11. The eBay panel should turn green **Connected**.
+3. Sign in to the eBay seller account you want Shop Sync to access.
+4. Approve Shop Sync.
+5. On the callback page select **Copy authorization result**.
+6. Return to Shop Sync and paste it into **Authorization result**.
+7. Select **Finish eBay connection**.
+8. The eBay panel should turn green **Connected**.
 
-The authorization result is short-lived and single-use. If it expires, is reused or fails state validation, select **Connect eBay** again and complete a fresh authorization.
+Shop Sync requests the basic API scope and **Sell Inventory** scope. The seller refresh credential is stored locally and short-lived access tokens are refreshed through the hosted broker.
 
-Shop Sync requests the eBay basic API scope and **Sell Inventory** scope. After approval, Shop Sync stores the seller's refresh credential locally so the user does not need to sign in again every time the short-lived access token expires.
+## Connect Etsy
+
+1. Open **Shop Sync**.
+2. Select **Connect Etsy**.
+3. Sign in to the Etsy seller account you want Shop Sync to access.
+4. Approve the Shop Sync consent screen.
+5. Etsy redirects to the hosted Shop Sync callback page.
+6. Select **Copy authorization result**.
+7. Return to Shop Sync and paste the copied value into **Authorization result**.
+8. Select **Finish Etsy connection**.
+9. Shop Sync discovers the authorised Etsy Shop ID and the Etsy panel should turn green **Connected**.
+
+Normal users do not need to create an Etsy developer app or enter API credentials. Etsy access tokens are refreshed automatically.
 
 ## Connect Shopify
 
@@ -148,30 +130,9 @@ Shop Sync requests the eBay basic API scope and **Sell Inventory** scope. After 
    write_products,write_inventory,read_locations
    ```
 
-3. Release/activate the Shopify app version and install it on the store.
-4. Find the permanent `.myshopify.com` store domain.
-5. Enter the store domain, Client ID and Client secret in Shop Sync.
-6. Select **Test and save**.
-7. Shopify should show green **Connected**.
-
-Shop Sync obtains and renews short-lived Shopify Admin API tokens automatically.
-
-## Connect Etsy
-
-1. Sign in to the Etsy Developer Portal with the account that owns the shop.
-2. Create an Etsy Open API v3 seller app.
-3. Configure this callback URL:
-
-   ```text
-   https://adya84.github.io/Marketplace-Shop-Sync-eBay-Etsy-Shopify/etsy-callback.html
-   ```
-
-4. Enter the Etsy keystring and shared secret in Shop Sync.
-5. Select **Connect Etsy**.
-6. Approve the Etsy consent screen.
-7. On the callback page select **Copy authorization result**.
-8. Return to Shop Sync, paste it into **Authorization result** and select **Finish Etsy connection**.
-9. Shop Sync discovers the authorised Shop ID and renews Etsy access tokens automatically.
+3. Release/activate the app version and install it on the store.
+4. Enter the permanent `.myshopify.com` domain, Client ID and Client secret in Shop Sync.
+5. Select **Test and save**.
 
 ## Connect TikTok Shop
 
@@ -179,33 +140,25 @@ Shop Sync obtains and renews short-lived Shopify Admin API tokens automatically.
 2. Obtain the app key and app secret.
 3. Authorise the seller shop and obtain the seller access token.
 4. Obtain the selected shop's `cipher` value.
-5. Enter the app key, app secret, seller access token and shop cipher into Shop Sync.
-6. Select **Test and save**.
-
-TikTok's live seller access depends on the app's approval/publication status.
+5. Enter those values into Shop Sync and select **Test and save**.
 
 ## Import listings and create Shopify drafts
 
 1. Connect Shopify and at least one source marketplace.
 2. Select the matching import action under **Import catalogues**.
-3. Watch the **LIVE Activity** panel while the import or transfer runs. It refreshes every 2 seconds and shows the current job, progress and last update time.
-4. eBay listings that have been removed or become unavailable are skipped automatically; the rest of the import continues.
-5. Use the **Ready to send** catalogue controls to search by title/SKU/listing ID, filter by marketplace and move through pages of 50 listings.
-6. Check the **Stock** column before sending a product. For products with variants the catalogue shows the combined available stock and the variant count.
-7. Review imported products and any entries under **Review duplicate titles**.
-8. Start with one product and select **Create Shopify draft**.
-9. Check the resulting Shopify draft carefully, including title, description, photos, variants, SKUs, prices and inventory.
-10. Once satisfied, select multiple products to queue additional drafts. Bulk transfers display `Creating X / total` plus completed, failed and remaining counts in LIVE Activity.
-11. Use Activity history pagination to review older completed or failed jobs. Individual failures stay visible so one failed product does not disappear in a large run.
+3. Watch the **LIVE Activity** panel while the import runs.
+4. Use **Ready to send** to search, filter and review imported products.
+5. Check the Stock column and variants before transfer.
+6. Start with one product and select **Create Shopify draft**.
+7. Review the resulting Shopify draft carefully.
+8. Use bulk selection once satisfied with the result.
 
-Shop Sync deliberately creates Shopify drafts rather than immediately publishing products. Version `0.0.28` includes the inventory verification introduced in `0.0.26`, the Shopify media-readiness retry introduced in `0.0.27`, and the new live/paginated Activity system.
+Shop Sync deliberately creates drafts rather than immediately publishing products.
 
-## eBay publisher / OAuth broker setup
+## Publisher OAuth broker setup
 
 > [!NOTE]
 > This section is only for the Shop Sync publisher/operator. Normal Shop Sync users should ignore it.
-
-The public Home Assistant repository must **never contain the eBay Cert ID/client secret**. Shop Sync therefore uses a hosted OAuth broker.
 
 Production broker:
 
@@ -219,62 +172,61 @@ Health check:
 https://shop-sync-ebay-oauth.graffidoodle.workers.dev/health
 ```
 
-Before releasing/testing Shop Sync it must report:
+Expected production response:
 
 ```json
-{"status":"ok","configured":true}
+{"status":"ok","configured":true,"ebay_configured":true,"etsy_configured":true}
 ```
 
-The Cloudflare Worker holds these server-side variables/secrets:
+The Cloudflare Worker holds these variables/secrets:
 
 ```text
+BROKER_SIGNING_SECRET=<long random secret>
 EBAY_CLIENT_ID=<Shop Sync production App ID>
 EBAY_CLIENT_SECRET=<Shop Sync production Cert ID>
 EBAY_RUNAME=<Shop Sync production RuName>
-BROKER_SIGNING_SECRET=<long random secret>
+ETSY_KEYSTRING=<Shop Sync Etsy production keystring>
+ETSY_SHARED_SECRET=<Shop Sync Etsy shared secret>
 ```
 
-The eBay **Auth accepted URL** and **Auth declined URL** should both be:
+The eBay accepted and declined callback URL is:
 
 ```text
 https://shop-sync-ebay-oauth.graffidoodle.workers.dev/api/ebay/oauth/callback
 ```
 
-The eBay Client ID, Cert ID and broker signing secret must never be committed to GitHub or shipped inside the Home Assistant app. The Home Assistant app only contains the public broker URL.
+The Etsy production callback URL is:
 
-The broker provides OAuth start, callback, code exchange and refresh endpoints. Callback results are signed, short-lived and validated again by the Home Assistant app using the original OAuth state.
+```text
+https://shop-sync-ebay-oauth.graffidoodle.workers.dev/api/etsy/oauth/callback
+```
 
-See [`oauth_broker/README.md`](oauth_broker/README.md) for operator/deployment details.
+Never commit any of the publisher secrets to GitHub or ship them in the Home Assistant app.
+
+See [`oauth_broker/README.md`](oauth_broker/README.md) for the full broker deployment/security details.
 
 ## Security and privacy
 
-- Never commit eBay Cert IDs/client secrets, marketplace access tokens or refresh tokens to GitHub.
-- The eBay client secret belongs only on the hosted OAuth broker.
-- Seller OAuth credentials are stored in the Home Assistant app's private persistent data through Shop Sync's installation-specific authenticated credential wrapper.
-- OAuth tokens are not intentionally returned by the status API or written to application logs.
-- Saved secret fields intentionally appear blank after a page reload.
-- Users can revoke Shop Sync access from the relevant marketplace account where supported.
-- See [PRIVACY.md](PRIVACY.md) for the Shop Sync privacy policy.
+- Publisher eBay and Etsy secrets live only on the hosted broker.
+- Seller OAuth credentials are stored in the user's private Shop Sync add-on data.
+- OAuth callback results are signed, short-lived and checked against the original state.
+- OAuth tokens are not intentionally exposed through the status API or application logs.
+- Users can revoke Shop Sync access from the marketplace account where supported.
+- See [PRIVACY.md](PRIVACY.md) for the privacy policy.
 
 ## Troubleshooting
 
-- **Home Assistant still shows the old eBay App ID/Cert ID/RuName form:** update Shop Sync to `0.0.28` or later and restart the app.
-- **Connect eBay cannot open:** check the broker health URL and confirm it reports `configured:true`.
-- **Authorization result rejected:** select **Connect eBay** again; callback results expire and are single-use.
-- **eBay state mismatch:** discard the result and start a fresh connection.
-- **eBay approval returns to the wrong page:** the publisher should verify both eBay accepted/declined URLs point to the Cloudflare callback.
-- **Removed eBay listing stops an import:** update to `0.0.25` or later. Removed/unavailable listings are skipped and the import continues.
-- **Not all imported listings appear on screen:** update to `0.0.26` or later and use the catalogue page controls. The Ready to send table displays 50 listings per page.
-- **Need to find a specific imported listing:** use the Ready to send search field with the title, SKU or marketplace listing ID.
-- **eBay stock shows as zero before transfer:** re-import the eBay catalogue and verify the Stock column. Shop Sync uses eBay's available quantity fields and falls back to listed quantity minus quantity sold where required.
-- **Shopify draft stock becomes zero:** update to `0.0.26` or later. Inventory is written during draft creation and read back for verification; a mismatch now fails the transfer job instead of being hidden.
-- **`Non-ready media cannot be attached to variants`:** update to `0.0.27` or later. Shop Sync retries that temporary Shopify media-processing condition before failing the transfer.
-- **Activity looks frozen or only shows a few jobs:** update to `0.0.28` or later. LIVE Activity refreshes every 2 seconds and Activity history is paginated instead of being limited to the last few jobs.
-- **A bulk transfer has a failed product:** the parent bulk job continues with the remaining products. Open Activity history to find the individual failed Shopify Export job and its error message.
-- **eBay import later fails authentication:** reconnect if the seller revoked access or the long-lived refresh token expired.
-- **Shopify says `write_products` is required:** verify the active Shopify app version includes `write_products`, reinstall it and restart Shop Sync.
-- **Etsy authorization fails:** start a fresh Etsy connection because its authorization code is single-use.
-- **Saved secret fields look blank:** this is intentional; check the green/red connection status instead.
+- **Home Assistant still shows Etsy keystring/shared-secret fields:** update Shop Sync to `0.0.29` or later and restart the add-on.
+- **Connect Etsy cannot open:** check the broker `/health` endpoint and confirm `etsy_configured:true`.
+- **Etsy authorization result rejected:** select **Connect Etsy** again; the result is short-lived and single-use.
+- **Etsy state mismatch:** discard the result and start a fresh connection.
+- **Etsy import later fails authentication:** reconnect if the seller revoked access or the refresh token is no longer valid.
+- **Connect eBay cannot open:** check the same health endpoint and confirm `ebay_configured:true`.
+- **eBay authorization result rejected:** start a fresh eBay connection.
+- **Not all imported listings appear:** use the catalogue page controls and search/filter tools.
+- **Shopify draft stock becomes zero:** re-import and verify the Stock column; inventory write-back verification should fail the job if Shopify does not store the expected value.
+- **`Non-ready media cannot be attached to variants`:** Shop Sync retries this temporary Shopify processing state before failing.
+- **Activity looks frozen:** LIVE Activity should refresh every 2 seconds; restart the add-on if the frontend was left open across an update.
 
 ## Development
 
@@ -283,11 +235,11 @@ The Home Assistant service uses Python, FastAPI and SQLite.
 ```bash
 cd marketplace_bridge
 python -m pip install -r requirements.txt pytest
-BRIDGE_DATA_DIR=./data python -m uvicorn app.main_v3:app --reload --port 8099
+BRIDGE_DATA_DIR=./data python -m uvicorn app.main_v4:app --reload --port 8099
 pytest app/tests
 ```
 
-The installable Home Assistant app is in `marketplace_bridge/`. The eBay OAuth broker is deployed separately so the eBay client secret is never shipped to Home Assistant users.
+The installable Home Assistant app is in `marketplace_bridge/`. The shared eBay/Etsy OAuth broker is deployed separately so publisher secrets are never shipped to Home Assistant users.
 
 ## Not implemented yet
 

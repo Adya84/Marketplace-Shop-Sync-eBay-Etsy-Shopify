@@ -1,25 +1,25 @@
-# Shop Sync eBay OAuth broker
+# Shop Sync eBay + Etsy OAuth broker
 
-This service keeps the Shop Sync eBay **Cert ID/client secret** off end-user Home Assistant installations.
+This service keeps the Shop Sync publisher **eBay client secret** and **Etsy shared secret** off end-user Home Assistant installations.
 
-Normal Shop Sync users never need an eBay Developer account. The Home Assistant app asks this broker for the official eBay authorization URL, the user signs into eBay and grants consent, and the broker performs the confidential authorization-code and refresh-token exchanges with eBay.
+Normal Shop Sync users do not need an eBay Developer account or Etsy developer application. The Home Assistant add-on asks the hosted broker for the official marketplace authorization URL, the seller signs in and grants consent, and the broker performs the sensitive OAuth/token work using the publisher credentials stored only on Cloudflare.
 
 ## Normal users do not configure this
 
-The broker is operated centrally for Shop Sync. End users should **not** create their own broker, eBay developer application, Client ID, Cert ID or RuName.
+The broker is operated centrally for Shop Sync. End users should not create their own broker or enter publisher API credentials into Home Assistant.
 
-A normal user's eBay flow is simply:
+A normal connection flow is:
 
 1. Install/update Shop Sync.
-2. Select **Connect eBay**.
-3. Sign in to their own eBay seller account.
+2. Select **Connect eBay** or **Connect Etsy**.
+3. Sign in to the seller account.
 4. Approve Shop Sync.
-5. Copy the short-lived authorization result from the callback page.
+5. Copy the short-lived authorization result from the hosted callback page.
 6. Paste it into Shop Sync and finish the connection.
 
 ## Production deployment
 
-The production Shop Sync broker is deployed as a Cloudflare Worker at:
+Production broker:
 
 ```text
 https://shop-sync-ebay-oauth.graffidoodle.workers.dev
@@ -31,39 +31,41 @@ Health check:
 GET https://shop-sync-ebay-oauth.graffidoodle.workers.dev/health
 ```
 
-The expected response is:
+Expected response when both providers are configured:
 
 ```json
-{"status":"ok","configured":true}
+{"status":"ok","configured":true,"ebay_configured":true,"etsy_configured":true}
 ```
 
-If `configured` is `false`, verify the current active Cloudflare deployment includes all required variables/secrets. Cloudflare may create a new Worker version after variables are added; promote the newest version to 100% traffic if necessary.
+If either provider is false, verify the active Cloudflare Worker version contains the matching variables/secrets and is receiving 100% production traffic.
 
 ## Required Cloudflare variables and secrets
 
-The production Worker requires:
-
 ```text
+BROKER_SIGNING_SECRET=<long random secret>
 EBAY_CLIENT_ID=<production App ID / Client ID>
 EBAY_CLIENT_SECRET=<production Cert ID / Client secret>
 EBAY_RUNAME=<production OAuth-enabled RuName>
-BROKER_SIGNING_SECRET=<long random value, separate from the eBay secret>
+ETSY_KEYSTRING=<production Etsy keystring>
+ETSY_SHARED_SECRET=<production Etsy shared secret>
 ```
 
 Recommended Cloudflare types:
 
+- `BROKER_SIGNING_SECRET` — Secret.
 - `EBAY_CLIENT_ID` — Secret.
 - `EBAY_CLIENT_SECRET` — Secret.
-- `EBAY_RUNAME` — Text is sufficient.
-- `BROKER_SIGNING_SECRET` — Secret.
+- `EBAY_RUNAME` — Text.
+- `ETSY_KEYSTRING` — Secret.
+- `ETSY_SHARED_SECRET` — Secret.
 
-The current Worker code does not require `OAUTH_REDIRECT_URI`; if an old deployment still contains it, it is harmless but can be removed.
+An old `OAUTH_REDIRECT_URI` variable is not required by the current Worker and may be removed, although leaving it present is harmless.
 
-Never commit any of the actual values to GitHub. Never place the eBay Cert ID/client secret in the Home Assistant app, JavaScript shipped to end users, screenshots, issues or support logs.
+Never commit the real values to GitHub, screenshots, issues, logs or code distributed to Home Assistant users.
 
 ## eBay Developer configuration
 
-The publisher's production RuName should have OAuth enabled and should request:
+The publisher's production RuName should request:
 
 ```text
 https://api.ebay.com/oauth/api_scope
@@ -76,42 +78,76 @@ Set both **Auth accepted URL** and **Auth declined URL** to:
 https://shop-sync-ebay-oauth.graffidoodle.workers.dev/api/ebay/oauth/callback
 ```
 
-The RuName itself remains the eBay-generated redirect URL name and is supplied to eBay as the OAuth `redirect_uri`. It is not the same thing as the callback web address above.
+The RuName remains the eBay-generated redirect URL name supplied to eBay during OAuth. It is not the same as the callback web address.
 
-## Required public endpoints
+## Etsy Developer configuration
 
-The production broker contract is:
+Register the production callback URL:
 
-- `POST /api/ebay/oauth/start` — accepts Shop Sync state/environment and returns the official eBay consent URL.
-- `GET /api/ebay/oauth/callback` — eBay's accepted/declined redirect target and callback page.
-- `POST /api/ebay/oauth/exchange` — validates the signed callback result and exchanges the eBay authorization code for seller tokens.
-- `POST /api/ebay/oauth/refresh` — renews an expired seller access token using the seller refresh token plus the broker-issued refresh proof.
-- `GET /health` — reports service/configuration health without exposing secrets.
+```text
+https://shop-sync-ebay-oauth.graffidoodle.workers.dev/api/etsy/oauth/callback
+```
+
+Shop Sync currently requests:
+
+```text
+listings_r listings_w shops_r
+```
+
+Etsy OAuth uses PKCE with `S256`. The broker derives the code verifier from the broker signing secret and the original OAuth state, so it does not need to persist a verifier between the start and exchange requests.
+
+The Etsy publisher keystring/shared secret stay on the broker. Etsy Open API reads are proxied through the broker so the required publisher `x-api-key` value is never shipped to end-user Home Assistant installations.
+
+## Public broker endpoints
+
+### eBay
+
+- `POST /api/ebay/oauth/start` — returns the official eBay authorization URL.
+- `GET /api/ebay/oauth/callback` — eBay accepted/declined callback page.
+- `POST /api/ebay/oauth/exchange` — verifies the signed result and exchanges the code for seller tokens.
+- `POST /api/ebay/oauth/refresh` — renews a short-lived seller access token using the refresh token plus broker-issued proof.
+
+### Etsy
+
+- `POST /api/etsy/oauth/start` — returns the official Etsy PKCE authorization URL.
+- `GET /api/etsy/oauth/callback` — Etsy callback page and signed authorization result.
+- `POST /api/etsy/oauth/exchange` — verifies the signed result and exchanges the code using the derived PKCE verifier.
+- `POST /api/etsy/oauth/refresh` — renews Etsy access credentials using broker-issued refresh proof.
+- `POST /api/etsy/api/get` — performs authorised Etsy Open API GET requests while keeping the publisher shared secret server-side.
+
+### Service
+
+- `GET /health` — reports provider configuration without exposing any secret values.
 
 ## Security model
 
-- The eBay Client Secret exists only on the hosted broker.
-- The seller authorizes Shop Sync using eBay's official consent page; Shop Sync never asks for the user's eBay password.
-- Callback results are signed and expire after about 15 minutes.
-- The Home Assistant app validates the original OAuth `state` before accepting the result.
-- Seller access/refresh credentials are stored in that user's local Shop Sync installation, not committed to the repository.
-- Refresh requests require both the seller refresh token and a broker-issued proof.
+- eBay Client Secret and Etsy Shared Secret exist only on the hosted broker.
+- Sellers authenticate only on the marketplace's official sign-in/consent pages.
+- Shop Sync never asks for seller passwords.
+- Callback results are signed with `BROKER_SIGNING_SECRET` and expire after about 15 minutes.
+- The Home Assistant add-on validates the original OAuth `state` before accepting a result.
+- Seller access/refresh credentials are stored in that user's local Shop Sync installation.
+- eBay refresh requests require a broker-issued refresh proof.
+- Etsy refresh requests require an Etsy-specific broker-issued refresh proof.
+- Etsy API proxy requests require a broker key bound to the current access token.
+- The Etsy proxy only allows `/v3/application/` paths and blocks path traversal/absolute URL injection.
 - HTTPS is required in production.
 - Protect the Cloudflare account with MFA.
-- Rotate the broker signing secret and eBay Cert ID if either is suspected to have leaked.
+- Rotate the broker signing secret and affected publisher credentials if a secret may have leaked.
 
 ## Cloudflare deployment checklist
 
-1. Create/deploy the Worker.
-2. Add the four required variables/secrets above.
-3. Promote the newest Worker version so it receives 100% traffic.
-4. Open `/health` and confirm `configured:true`.
-5. In eBay Developer settings, set accepted and declined URLs to the Worker callback.
-6. Save the eBay redirect configuration.
-7. Ensure Home Assistant Shop Sync `0.0.24` or later points at the production broker URL.
-8. Test with one eBay seller account before announcing the release.
+1. Deploy the current Worker code.
+2. Add all required variables/secrets.
+3. Promote the newest Worker version to 100% production traffic.
+4. Open `/health` and confirm both `ebay_configured:true` and `etsy_configured:true`.
+5. Verify the eBay accepted/declined URLs.
+6. Verify the Etsy callback URL.
+7. Update Shop Sync to `0.0.29` or later.
+8. Test one eBay connection and one Etsy connection before announcing the release.
+9. Run one small marketplace import and confirm token refresh/import behaviour before a larger catalogue transfer.
 
-## Alternate/local implementation
+## Alternate/local Python implementation
 
 The Python implementation in this folder documents the broker protocol and can be used for local testing or alternate hosting:
 
@@ -121,4 +157,4 @@ python -m pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 8080
 ```
 
-An alternate deployment is acceptable as long as it preserves the same endpoint contract and security properties and keeps the eBay Client Secret server-side only.
+The production Cloudflare Worker may be implemented separately as long as it preserves the same endpoint contract and security properties and keeps publisher secrets server-side only.
