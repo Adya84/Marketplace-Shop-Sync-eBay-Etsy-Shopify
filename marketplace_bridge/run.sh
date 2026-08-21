@@ -7,4 +7,4 @@ export EBAY_MARKETPLACE="$(bashio::config 'ebay_marketplace')"
 export EBAY_ENVIRONMENT="$(bashio::config 'ebay_environment')"
 export SHOPIFY_API_VERSION="$(bashio::config 'shopify_api_version')"
 
-exec python3 -m uvicorn app.main_v3:app --host 0.0.0.0 --port 8099 --proxy-headers
+exec python3 -m uvicorn app.main_v4:app --host 0.0.0.0 --port 8099 --proxy-headers
