@@ -63,9 +63,21 @@ Shop Sync uses eBay's basic API scope and Sell Inventory scope. eBay requires us
 
 This section is for the Shop Sync publisher/operator only, not normal users.
 
-The public Home Assistant repository must **never contain the eBay Cert ID/client secret**. eBay requires the client secret when an authorization code is exchanged for a user access token, so Shop Sync 0.0.24 uses a small hosted OAuth broker. Source for that broker is in [`oauth_broker/`](oauth_broker/).
+The public Home Assistant repository must **never contain the eBay Cert ID/client secret**. eBay requires the client secret when an authorization code is exchanged for a user access token, so Shop Sync 0.0.24 uses a hosted OAuth broker. The production broker is a Cloudflare Worker at:
 
-The broker must be deployed at the configured `EBAY_OAUTH_BROKER_URL` and must hold these server-side environment variables:
+```text
+https://shop-sync-ebay-oauth.graffidoodle.workers.dev
+```
+
+Its health endpoint is:
+
+```text
+https://shop-sync-ebay-oauth.graffidoodle.workers.dev/health
+```
+
+and should report `{"status":"ok","configured":true}` before releasing or testing Shop Sync.
+
+The broker holds these server-side Cloudflare variables/secrets:
 
 ```text
 EBAY_CLIENT_ID=<Shop Sync production App ID>
@@ -74,15 +86,17 @@ EBAY_RUNAME=<Shop Sync production RuName>
 BROKER_SIGNING_SECRET=<long random secret>
 ```
 
-The eBay **Auth accepted URL** and **Auth declined URL** should point to the broker callback:
+The eBay **Auth accepted URL** and **Auth declined URL** should both point to:
 
 ```text
-https://shop-sync-ebay-compliance.zesty-flame-5295.chatgpt.site/api/ebay/oauth/callback
+https://shop-sync-ebay-oauth.graffidoodle.workers.dev/api/ebay/oauth/callback
 ```
+
+The eBay Client ID, Cert ID and broker signing secret must never be committed to GitHub or shipped inside the Home Assistant app. The Home Assistant app only contains the public broker URL.
 
 The broker exposes the OAuth start, callback, code exchange and refresh endpoints. It signs one-time callback results and issues a refresh proof so possession of a raw refresh token alone is not enough to use the public refresh endpoint.
 
-See [`oauth_broker/README.md`](oauth_broker/README.md) before deploying or changing the OAuth service.
+See [`oauth_broker/README.md`](oauth_broker/README.md) for the broker architecture and security notes.
 
 ## Shopify connection
 
@@ -129,7 +143,7 @@ TikTok Shop currently uses the app key, app secret, seller access token and shop
 
 ## Troubleshooting
 
-- **Connect eBay cannot open:** check that the hosted OAuth broker is online and `/health` reports configured.
+- **Connect eBay cannot open:** check `https://shop-sync-ebay-oauth.graffidoodle.workers.dev/health` and confirm it reports `configured:true`.
 - **Authorization result rejected:** select **Connect eBay** again; callback results expire and are single-use.
 - **eBay state mismatch:** discard the result and start a fresh connection.
 - **eBay import later fails authentication:** reconnect if the seller revoked access or the long-lived refresh token expired.
@@ -147,7 +161,7 @@ BRIDGE_DATA_DIR=./data python -m uvicorn app.main_v2:app --reload --port 8099
 pytest app/tests
 ```
 
-The installable Home Assistant app is in `marketplace_bridge/`. The hosted eBay OAuth broker is in `oauth_broker/` and is deployed separately so the eBay client secret is never shipped to Home Assistant users.
+The installable Home Assistant app is in `marketplace_bridge/`. The eBay OAuth broker is deployed separately so the eBay client secret is never shipped to Home Assistant users.
 
 ## Not implemented yet
 
