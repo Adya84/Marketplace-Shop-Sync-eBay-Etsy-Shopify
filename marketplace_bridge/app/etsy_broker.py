@@ -10,7 +10,7 @@ import httpx
 from .etsy import EtsyClient
 
 
-DEFAULT_BROKER_URL = "https://shop-sync-ebay-compliance.zesty-flame-5295.chatgpt.site"
+DEFAULT_BROKER_URL = "https://shop-sync-ebay-oauth.graffidoodle.workers.dev"
 
 
 def parse_authorization_result(value: str) -> dict[str, str]:
