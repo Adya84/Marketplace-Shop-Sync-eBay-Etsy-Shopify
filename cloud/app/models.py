@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
 
@@ -63,4 +63,54 @@ class SyncJob(Base):
     progress: Mapped[str] = mapped_column(String(64), default="0/0")
     message: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class CatalogProduct(Base):
+    __tablename__ = "catalog_products"
+    __table_args__ = (UniqueConstraint("workspace_id", "source", "source_id", name="uq_workspace_catalog_product"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    source_id: Mapped[str] = mapped_column(String(255), index=True)
+    title: Mapped[str] = mapped_column(String(512), default="")
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ListingMapping(Base):
+    __tablename__ = "listing_mappings"
+    __table_args__ = (UniqueConstraint("workspace_id", "source", "source_id", "destination", name="uq_workspace_listing_mapping"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    source_id: Mapped[str] = mapped_column(String(255), index=True)
+    destination: Mapped[str] = mapped_column(String(32), index=True)
+    destination_id: Mapped[str] = mapped_column(String(255), default="")
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class DuplicateApproval(Base):
+    __tablename__ = "duplicate_approvals_cloud"
+    __table_args__ = (UniqueConstraint("workspace_id", "source", "source_id", "destination", name="uq_workspace_duplicate_approval"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    source_id: Mapped[str] = mapped_column(String(255), index=True)
+    destination: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkspaceSetting(Base):
+    __tablename__ = "workspace_settings"
+    __table_args__ = (UniqueConstraint("workspace_id", "key", name="uq_workspace_setting"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    key: Mapped[str] = mapped_column(String(128), index=True)
+    value: Mapped[str] = mapped_column(Text, default="{}")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
