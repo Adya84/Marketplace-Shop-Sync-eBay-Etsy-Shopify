@@ -15,7 +15,6 @@ def utcnow() -> datetime:
 
 class User(Base):
     __tablename__ = "users"
-
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(512))
@@ -24,7 +23,6 @@ class User(Base):
 
 class Workspace(Base):
     __tablename__ = "workspaces"
-
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(160))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -33,7 +31,6 @@ class Workspace(Base):
 class Membership(Base):
     __tablename__ = "memberships"
     __table_args__ = (UniqueConstraint("user_id", "workspace_id", name="uq_membership"),)
-
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
@@ -43,7 +40,6 @@ class Membership(Base):
 class MarketplaceConnection(Base):
     __tablename__ = "marketplace_connections"
     __table_args__ = (UniqueConstraint("workspace_id", "provider", name="uq_workspace_provider"),)
-
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     provider: Mapped[str] = mapped_column(String(32), index=True)
@@ -55,7 +51,6 @@ class MarketplaceConnection(Base):
 
 class SyncJob(Base):
     __tablename__ = "sync_jobs"
-
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     kind: Mapped[str] = mapped_column(String(64), index=True)
@@ -69,7 +64,6 @@ class SyncJob(Base):
 class CatalogProduct(Base):
     __tablename__ = "catalog_products"
     __table_args__ = (UniqueConstraint("workspace_id", "source", "source_id", name="uq_workspace_catalog_product"),)
-
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     source: Mapped[str] = mapped_column(String(32), index=True)
@@ -82,7 +76,6 @@ class CatalogProduct(Base):
 class ListingMapping(Base):
     __tablename__ = "listing_mappings"
     __table_args__ = (UniqueConstraint("workspace_id", "source", "source_id", "destination", name="uq_workspace_listing_mapping"),)
-
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     source: Mapped[str] = mapped_column(String(32), index=True)
@@ -96,7 +89,17 @@ class ListingMapping(Base):
 class DuplicateApproval(Base):
     __tablename__ = "duplicate_approvals_cloud"
     __table_args__ = (UniqueConstraint("workspace_id", "source", "source_id", "destination", name="uq_workspace_duplicate_approval"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    source_id: Mapped[str] = mapped_column(String(255), index=True)
+    destination: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
+
+class CompletedDismissal(Base):
+    __tablename__ = "completed_dismissals_cloud"
+    __table_args__ = (UniqueConstraint("workspace_id", "source", "source_id", "destination", name="uq_workspace_completed_dismissal"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     source: Mapped[str] = mapped_column(String(32), index=True)
@@ -108,7 +111,6 @@ class DuplicateApproval(Base):
 class WorkspaceSetting(Base):
     __tablename__ = "workspace_settings"
     __table_args__ = (UniqueConstraint("workspace_id", "key", name="uq_workspace_setting"),)
-
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     key: Mapped[str] = mapped_column(String(128), index=True)
