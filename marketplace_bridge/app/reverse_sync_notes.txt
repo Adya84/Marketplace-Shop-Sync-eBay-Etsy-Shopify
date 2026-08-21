@@ -1,0 +1,1 @@
+0.0.31 reverse sync implementation: Shopify master -> Etsy/eBay destination adapters, Etsy >2-option splitting, per-variant quantity preservation, existing listing preflight using mapping/SKU/title/photo signals, and explicit update-vs-new confirmation.
