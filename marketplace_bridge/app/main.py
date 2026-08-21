@@ -16,6 +16,10 @@ from fastapi.responses import HTMLResponse
 
 from .db import Database
 from .ebay import EbayClient
+from .ebay_oauth import EBAY_SCOPES, authorization_url as ebay_authorization_url
+from .ebay_oauth import ensure_access_token as ensure_ebay_access_token
+from .ebay_oauth import exchange_code as exchange_ebay_code
+from .ebay_oauth import parse_callback_result as parse_ebay_callback_result
 from .etsy import EtsyClient
 from .security import SecretBox
 from .settings import settings
@@ -45,7 +49,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.22", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.23", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -68,8 +72,73 @@ def status():
 @app.post("/api/settings/ebay")
 async def configure_ebay(access_token: str = Form(...)):
     client = EbayClient(access_token, settings.ebay_environment)
-    await client.list_active_ids()  # Validates token before storage.
+    await client.list_active_ids()
     save_credentials("ebay", {"access_token": access_token})
+    return {"connected": True}
+
+
+@app.post("/api/oauth/ebay/start")
+async def start_ebay_oauth(
+    client_id: str = Form(...),
+    client_secret: str = Form(...),
+    runame: str = Form(...),
+):
+    client_id = client_id.strip()
+    client_secret = client_secret.strip()
+    runame = runame.strip()
+    if not client_id or not client_secret or not runame:
+        raise HTTPException(400, "App ID, Cert ID and RuName are required")
+    state = token_secrets.token_urlsafe(32)
+    save_credentials("ebay_oauth", {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "runame": runame,
+        "state": state,
+        "created_at": time.time(),
+    })
+    return {"authorization_url": ebay_authorization_url(client_id, runame, state, settings.ebay_environment)}
+
+
+@app.post("/api/oauth/ebay/finish")
+async def finish_ebay_oauth(oauth_result: str = Form(...)):
+    pending = get_credentials("ebay_oauth")
+    if time.time() - float(pending.get("created_at", 0)) > 900:
+        db.delete_credential("ebay_oauth")
+        raise HTTPException(400, "eBay connection expired; select Connect eBay and start again")
+    try:
+        result = parse_ebay_callback_result(oauth_result)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not token_secrets.compare_digest(str(result.get("state", "")), pending["state"]):
+        raise HTTPException(400, "eBay authorization state did not match; start the connection again")
+    try:
+        payload = await exchange_ebay_code(
+            pending["client_id"],
+            pending["client_secret"],
+            result["code"],
+            pending["runame"],
+            settings.ebay_environment,
+        )
+        credentials = {
+            "client_id": pending["client_id"],
+            "client_secret": pending["client_secret"],
+            "runame": pending["runame"],
+            "access_token": payload["access_token"],
+            "refresh_token": payload.get("refresh_token", ""),
+            "expires_at": time.time() + int(payload.get("expires_in", 7200)),
+            "refresh_token_expires_at": time.time() + int(payload.get("refresh_token_expires_in", 0)),
+            "scopes": list(EBAY_SCOPES),
+        }
+        client = EbayClient(credentials["access_token"], settings.ebay_environment)
+        await client.list_active_ids()
+    except httpx.HTTPStatusError as exc:
+        log.warning("eBay OAuth failed with HTTP status %s", exc.response.status_code)
+        raise HTTPException(502, f"eBay connection failed (HTTP {exc.response.status_code}); start again") from exc
+    except (KeyError, RuntimeError, ValueError) as exc:
+        log.warning("eBay OAuth failed: %s", exc)
+        raise HTTPException(400, str(exc)) from exc
+    save_credentials("ebay", credentials)
+    db.delete_credential("ebay_oauth")
     return {"connected": True}
 
 
@@ -221,6 +290,8 @@ async def run_ebay_import(job_id: int):
     try:
         db.update_job(job_id, status="running", message="Reading active eBay listings")
         credential = get_credentials("ebay")
+        credential = await ensure_ebay_access_token(credential, settings.ebay_environment)
+        save_credentials("ebay", credential)
         client = EbayClient(credential["access_token"], settings.ebay_environment)
         ids = await client.list_active_ids()
         db.update_job(job_id, total=len(ids), message=f"Found {len(ids)} listings")
@@ -382,7 +453,8 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     @media(max-width:650px){{main{{padding:16px}}.hero{{display:block}}table{{display:block;overflow:auto}}}}
     </style></head><body><main><div class="hero"><div><h1>Shop Sync</h1><p>Version {esc(app.version)} · Move complete listings between your marketplaces</p></div><a class="button-link" href="https://paypal.me/graffidoodle" target="_blank" rel="noopener noreferrer" aria-label="Buy me a beer">🍺 Buy me a beer</a></div>
     <div class="grid"><section class="card"><h2>eBay UK</h2><div class="status"><i class="dot {'ok' if ebay_connected else ''}"></i>{'Connected' if ebay_connected else 'Not connected'}</div>
-    <form method="post" action="api/settings/ebay" onsubmit="connect(event)"><label>Production user access token</label><input name="access_token" type="password" required autocomplete="off"><button>Test and save</button></form></section>
+    <form method="post" action="api/oauth/ebay/start" onsubmit="startEbay(event)"><label>App ID (Client ID)</label><input name="client_id" type="password" required autocomplete="off"><label>Cert ID (Client secret)</label><input name="client_secret" type="password" required autocomplete="off"><label>RuName (eBay Redirect URL name)</label><input name="runame" type="password" required autocomplete="off"><button>Connect eBay</button></form>
+    <form method="post" action="api/oauth/ebay/finish" onsubmit="connect(event)"><label>eBay callback URL</label><input name="oauth_result" required autocomplete="off" placeholder="Paste the full callback URL after approving eBay"><button>Finish eBay connection</button></form><small>Shop Sync stores the refresh token encrypted and renews the short-lived eBay access token automatically. Keep the Cert ID and tokens private.</small></section>
     <section class="card"><h2>Etsy</h2><div class="status"><i class="dot {'ok' if etsy_connected else ''}"></i>{'Connected' if etsy_connected else 'Not connected'}</div>
     <form method="post" action="api/oauth/etsy/start" onsubmit="startEtsy(event)"><label>API keystring</label><input name="keystring" type="password" required autocomplete="off"><label>Shared secret</label><input name="shared_secret" type="password" required autocomplete="off"><button>Connect Etsy</button></form>
     <form method="post" action="api/oauth/etsy/finish" onsubmit="connect(event)" class="etsy-finish"><label>Authorization result</label><input name="oauth_result" required autocomplete="off" placeholder="Paste the result copied from the Etsy approval page"><button>Finish Etsy connection</button></form><small>Tokens and Shop ID are created automatically. Never paste them into chat or screenshots.</small></section>
@@ -406,26 +478,30 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
       event.preventDefault();
       const form=event.currentTarget;
       const button=form.querySelector('button');
+      const original=button.textContent;
       button.disabled=true; button.textContent='Testing...';
       try{{
         const response=await fetch(endpoint(form.getAttribute('action')),{{method:'POST',body:new FormData(form)}});
         if(!response.ok)throw new Error(await response.text());
         location.reload();
-      }}catch(error){{alert(error.message); button.disabled=false; button.textContent='Test and save'}}
+      }}catch(error){{alert(error.message); button.disabled=false; button.textContent=original}}
     }}
-    async function startEtsy(event){{
+    async function startOauth(event,name){{
       event.preventDefault();
       const form=event.currentTarget;
       const button=form.querySelector('button');
-      button.disabled=true; button.textContent='Opening Etsy...';
+      const original=button.textContent;
+      button.disabled=true; button.textContent=`Opening ${{name}}...`;
       try{{
         const response=await fetch(endpoint(form.getAttribute('action')),{{method:'POST',body:new FormData(form)}});
         if(!response.ok)throw new Error(await response.text());
         const data=await response.json();
         window.open(data.authorization_url,'_blank','noopener');
-        button.disabled=false; button.textContent='Connect Etsy';
-      }}catch(error){{alert(error.message); button.disabled=false; button.textContent='Connect Etsy'}}
+        button.disabled=false; button.textContent=original;
+      }}catch(error){{alert(error.message); button.disabled=false; button.textContent=original}}
     }}
+    function startEbay(event){{return startOauth(event,'eBay')}}
+    function startEtsy(event){{return startOauth(event,'Etsy')}}
     async function send(path){{let r=await fetch(endpoint(path),{{method:'POST'}});if(!r.ok)alert(await r.text());else{{setTimeout(()=>location.reload(),800)}}}}
     function toggleAll(){{
       const boxes=[...document.querySelectorAll('.product-select')];
@@ -478,4 +554,3 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     }}
     setInterval(refreshActivity,60000)
     </script></main></body></html>'''
-
