@@ -6,7 +6,7 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is a Home Assistant OS app for importing marketplace listings and creating Shopify drafts. Version `0.0.26` uses a simple eBay connection: **normal users do not need an eBay Developer account, App ID, Cert ID, RuName or manually generated eBay token**. They connect their own seller account through the publisher-managed Shop Sync eBay OAuth application.
+Shop Sync is a Home Assistant OS app for importing marketplace listings and creating Shopify drafts. Version `0.0.28` uses a simple eBay connection: **normal users do not need an eBay Developer account, App ID, Cert ID, RuName or manually generated eBay token**. They connect their own seller account through the publisher-managed Shop Sync eBay OAuth application.
 
 > [!IMPORTANT]
 > Shop Sync is still a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous order/stock synchronisation and reverse marketplace publishing are still planned work.
@@ -56,7 +56,7 @@ https://adya84.github.io/Marketplace-Shop-Sync-eBay-Etsy-Shopify/etsy-callback.h
 
 TikTok Shop currently requires the app key, app secret, seller access token and shop cipher from TikTok Shop Partner Center. A development app can only authorise development shops until TikTok approves the app for live use.
 
-## What version 0.0.26 does
+## What version 0.0.28 does
 
 - Imports active eBay UK listings using OAuth user consent.
 - Uses the publisher-managed Shop Sync eBay OAuth application for end-user sign-in.
@@ -74,6 +74,13 @@ TikTok Shop currently requires the app key, app secret, seller access token and 
 - Preserves bulk selection and Shopify draft creation across the paginated catalogue.
 - Writes imported stock to Shopify when creating drafts and verifies the quantity after Shopify stores it.
 - Uses the source variant order as a fallback when Shopify does not immediately return the same SKU, preventing valid stock from silently becoming zero.
+- Retries Shopify variant-image linking when Shopify reports that newly uploaded media is not ready yet.
+- Adds a **LIVE Activity** panel showing the current job, current product/message, progress, percentage, running/queued counts and last update time.
+- Refreshes live Activity automatically every 2 seconds so long transfers no longer look frozen.
+- Keeps up to 5,000 recent activity jobs available to the UI instead of only showing the last few.
+- Adds Activity history pagination at 25 jobs per page with Previous/Next and page numbers.
+- Bulk Shopify transfers now use a parent progress job so the page can show `Creating X / total`, completed, failed and remaining counts while the transfer runs.
+- Keeps individual product failures visible in Activity while allowing the rest of a bulk transfer to continue.
 - Imports active Etsy listings through Open API v3 and renews Etsy OAuth tokens automatically.
 - Imports active TikTok Shop products.
 - Imports the Shopify catalogue for duplicate review and comparison.
@@ -102,11 +109,11 @@ Shop Sync is a custom Home Assistant app, not a HACS integration.
 
 ## Updating an existing installation
 
-For users upgrading from `0.0.25` or earlier:
+For users upgrading from `0.0.27` or earlier:
 
 1. Open **Home Assistant > Settings > Apps > Shop Sync**.
 2. Refresh the custom app repository if Home Assistant does not immediately show the new version.
-3. Install/update to `0.0.26` or later.
+3. Install/update to `0.0.28` or later.
 4. Restart Shop Sync.
 5. Reopen the Shop Sync sidebar page.
 
@@ -181,16 +188,17 @@ TikTok's live seller access depends on the app's approval/publication status.
 
 1. Connect Shopify and at least one source marketplace.
 2. Select the matching import action under **Import catalogues**.
-3. Watch **Activity** until the import completes.
+3. Watch the **LIVE Activity** panel while the import or transfer runs. It refreshes every 2 seconds and shows the current job, progress and last update time.
 4. eBay listings that have been removed or become unavailable are skipped automatically; the rest of the import continues.
 5. Use the **Ready to send** catalogue controls to search by title/SKU/listing ID, filter by marketplace and move through pages of 50 listings.
 6. Check the **Stock** column before sending a product. For products with variants the catalogue shows the combined available stock and the variant count.
 7. Review imported products and any entries under **Review duplicate titles**.
 8. Start with one product and select **Create Shopify draft**.
 9. Check the resulting Shopify draft carefully, including title, description, photos, variants, SKUs, prices and inventory.
-10. Once satisfied, select multiple products to queue additional drafts.
+10. Once satisfied, select multiple products to queue additional drafts. Bulk transfers display `Creating X / total` plus completed, failed and remaining counts in LIVE Activity.
+11. Use Activity history pagination to review older completed or failed jobs. Individual failures stay visible so one failed product does not disappear in a large run.
 
-Shop Sync deliberately creates Shopify drafts rather than immediately publishing products. Version `0.0.26` verifies Shopify's stored inventory after each draft transfer; if Shopify does not store the expected stock value, the transfer job is marked failed instead of silently reporting success with zero stock.
+Shop Sync deliberately creates Shopify drafts rather than immediately publishing products. Version `0.0.28` includes the inventory verification introduced in `0.0.26`, the Shopify media-readiness retry introduced in `0.0.27`, and the new live/paginated Activity system.
 
 ## eBay publisher / OAuth broker setup
 
@@ -250,7 +258,7 @@ See [`oauth_broker/README.md`](oauth_broker/README.md) for operator/deployment d
 
 ## Troubleshooting
 
-- **Home Assistant still shows the old eBay App ID/Cert ID/RuName form:** update Shop Sync to `0.0.26` or later and restart the app.
+- **Home Assistant still shows the old eBay App ID/Cert ID/RuName form:** update Shop Sync to `0.0.28` or later and restart the app.
 - **Connect eBay cannot open:** check the broker health URL and confirm it reports `configured:true`.
 - **Authorization result rejected:** select **Connect eBay** again; callback results expire and are single-use.
 - **eBay state mismatch:** discard the result and start a fresh connection.
@@ -260,6 +268,9 @@ See [`oauth_broker/README.md`](oauth_broker/README.md) for operator/deployment d
 - **Need to find a specific imported listing:** use the Ready to send search field with the title, SKU or marketplace listing ID.
 - **eBay stock shows as zero before transfer:** re-import the eBay catalogue and verify the Stock column. Shop Sync uses eBay's available quantity fields and falls back to listed quantity minus quantity sold where required.
 - **Shopify draft stock becomes zero:** update to `0.0.26` or later. Inventory is written during draft creation and read back for verification; a mismatch now fails the transfer job instead of being hidden.
+- **`Non-ready media cannot be attached to variants`:** update to `0.0.27` or later. Shop Sync retries that temporary Shopify media-processing condition before failing the transfer.
+- **Activity looks frozen or only shows a few jobs:** update to `0.0.28` or later. LIVE Activity refreshes every 2 seconds and Activity history is paginated instead of being limited to the last few jobs.
+- **A bulk transfer has a failed product:** the parent bulk job continues with the remaining products. Open Activity history to find the individual failed Shopify Export job and its error message.
 - **eBay import later fails authentication:** reconnect if the seller revoked access or the long-lived refresh token expired.
 - **Shopify says `write_products` is required:** verify the active Shopify app version includes `write_products`, reinstall it and restart Shop Sync.
 - **Etsy authorization fails:** start a fresh Etsy connection because its authorization code is single-use.
@@ -272,7 +283,7 @@ The Home Assistant service uses Python, FastAPI and SQLite.
 ```bash
 cd marketplace_bridge
 python -m pip install -r requirements.txt pytest
-BRIDGE_DATA_DIR=./data python -m uvicorn app.main_v2:app --reload --port 8099
+BRIDGE_DATA_DIR=./data python -m uvicorn app.main_v3:app --reload --port 8099
 pytest app/tests
 ```
 
