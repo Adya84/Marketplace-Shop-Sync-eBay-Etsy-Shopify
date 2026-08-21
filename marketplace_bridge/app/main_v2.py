@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import secrets as token_secrets
 import time
+import uuid
 
 import httpx
 from fastapi import Form, HTTPException
@@ -134,6 +135,115 @@ async def run_ebay_import(job_id: int):
 
 
 legacy.run_ebay_import = run_ebay_import
+
+
+async def _set_shopify_inventory(self, created_variants: list[dict], source_variants: list[dict]):
+    """Set source stock on Shopify and verify every variant after writing it.
+
+    ProductSet creates inventory items but their first inventory level can start
+    at zero. Use the source variant by position as the primary mapping so stock
+    is not lost if Shopify rewrites or omits a SKU in its immediate response.
+    """
+    location_query = "{ locations(first: 1) { nodes { id name } } }"
+    activate_query = """
+    mutation Activate($inventoryItemId: ID!, $locationId: ID!, $available: Int, $idempotencyKey: String!) {
+      inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId, available: $available)
+        @idempotent(key: $idempotencyKey) {
+        inventoryLevel { id quantities(names: [\"available\"]) { name quantity } }
+        userErrors { field message }
+      }
+    }
+    """
+    current_query = """
+    query CurrentInventory($inventoryItemId: ID!, $locationId: ID!) {
+      inventoryItem(id: $inventoryItemId) {
+        inventoryLevel(locationId: $locationId) {
+          quantities(names: [\"available\"]) { name quantity }
+        }
+      }
+    }
+    """
+    set_query = """
+    mutation SetInventory($input: InventorySetQuantitiesInput!, $idempotencyKey: String!) {
+      inventorySetQuantities(input: $input) @idempotent(key: $idempotencyKey) {
+        inventoryAdjustmentGroup { createdAt }
+        userErrors { field message code }
+      }
+    }
+    """
+
+    location_data = await self.graphql(location_query)
+    locations = location_data["locations"]["nodes"]
+    if not locations:
+        raise RuntimeError("Shopify store has no inventory location")
+    location_id = locations[0]["id"]
+
+    source_by_sku = {
+        str(v.get("sku") or ""): max(0, int(v.get("quantity") or 0))
+        for v in source_variants
+        if str(v.get("sku") or "")
+    }
+
+    for index, variant in enumerate(created_variants):
+        inventory_item_id = variant["inventoryItem"]["id"]
+        created_sku = str(variant.get("sku") or "")
+        if index < len(source_variants):
+            target = max(0, int(source_variants[index].get("quantity") or 0))
+        else:
+            target = source_by_sku.get(created_sku, 0)
+
+        activation = await self.graphql(activate_query, {
+            "inventoryItemId": inventory_item_id,
+            "locationId": location_id,
+            "available": target,
+            "idempotencyKey": str(uuid.uuid4()),
+        })
+        activation_errors = activation["inventoryActivate"]["userErrors"]
+
+        current_data = await self.graphql(current_query, {
+            "inventoryItemId": inventory_item_id,
+            "locationId": location_id,
+        })
+        level = current_data["inventoryItem"]["inventoryLevel"]
+        if not level:
+            if activation_errors:
+                raise RuntimeError("; ".join(e["message"] for e in activation_errors))
+            raise RuntimeError("Shopify inventory level was not activated")
+        current = next((q["quantity"] for q in level["quantities"] if q["name"] == "available"), 0)
+
+        if current != target:
+            data = await self.graphql(set_query, {
+                "idempotencyKey": str(uuid.uuid4()),
+                "input": {
+                    "name": "available",
+                    "reason": "correction",
+                    "quantities": [{
+                        "inventoryItemId": inventory_item_id,
+                        "locationId": location_id,
+                        "quantity": target,
+                        "changeFromQuantity": current,
+                    }],
+                },
+            })
+            errors = data["inventorySetQuantities"]["userErrors"]
+            if errors:
+                raise RuntimeError("; ".join(e["message"] for e in errors))
+
+        verified_data = await self.graphql(current_query, {
+            "inventoryItemId": inventory_item_id,
+            "locationId": location_id,
+        })
+        verified_level = verified_data["inventoryItem"]["inventoryLevel"]
+        verified = next(
+            (q["quantity"] for q in (verified_level or {}).get("quantities", []) if q["name"] == "available"),
+            None,
+        )
+        if verified != target:
+            label = created_sku or f"variant {index + 1}"
+            raise RuntimeError(f"Shopify stock verification failed for {label}: expected {target}, got {verified}")
+
+
+legacy.ShopifyClient._set_inventory = _set_shopify_inventory
 
 
 _original_render_dashboard = legacy.render_dashboard
