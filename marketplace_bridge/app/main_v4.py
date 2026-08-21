@@ -49,9 +49,6 @@ class EtsyClient(LegacyEtsyClient):
         self.broker_url = broker_url or settings.etsy_oauth_broker_url
         self._broker = EtsyOAuthBroker(self.broker_url)
         if oauth_mode == "publisher_broker":
-            # The base class contains all Etsy normalisation logic. Dummy values
-            # satisfy its legacy constructor but are never sent to Etsy because
-            # _get/_refresh are overridden below in broker mode.
             super().__init__("broker", "broker", shop_id or "pending", access_token, refresh_token, expires_at)
         else:
             super().__init__(keystring, shared_secret, shop_id, access_token, refresh_token, expires_at)
@@ -99,8 +96,6 @@ class EtsyClient(LegacyEtsyClient):
         }
 
 
-# Existing import code in main.py resolves EtsyClient from its module globals at
-# runtime, so replacing it here upgrades imports without duplicating that logic.
 core.EtsyClient = EtsyClient
 
 
@@ -172,6 +167,39 @@ def _upgrade_etsy_panel(page: str) -> str:
     return page.replace(old, new)
 
 
+def _fix_activity_refresh(page: str) -> str:
+    page = page.replace(
+        '<button onclick="refreshActivityV28()">Refresh now</button>',
+        '<button id="activity-refresh-now" type="button" onclick="refreshActivityManualV29()">Refresh now</button>',
+    )
+    script = r'''
+    <script>
+    async function refreshActivityManualV29(){
+      const button=document.getElementById('activity-refresh-now');
+      if(button){button.disabled=true;button.textContent='Refreshing…'}
+      try{
+        const response=await fetch(endpoint('api/status')+(endpoint('api/status').includes('?')?'&':'?')+'_='+Date.now(),{cache:'no-store'});
+        if(!response.ok)throw new Error(await response.text());
+        const data=await response.json();
+        activityJobs=Array.isArray(data.jobs)?data.jobs:[];
+        activityPage=1;
+        renderActivityLive(data.activity||{});
+        renderActivityHistory();
+        const age=document.getElementById('activity-live-age');
+        if(age&&!data.activity?.active)age.textContent='refreshed just now';
+      }catch(error){
+        console.warn('Manual Activity refresh failed',error);
+        const message=document.getElementById('activity-live-message');
+        if(message)message.textContent='Activity refresh failed. Automatic refresh will keep trying.';
+      }finally{
+        if(button){button.disabled=false;button.textContent='Refresh now'}
+      }
+    }
+    </script>
+    '''
+    return page.replace('</body>', script + '</body>', 1)
+
+
 _drop_route("/", "GET")
 
 
@@ -188,4 +216,5 @@ def dashboard():
         core.db.get_credential("tiktok") is not None,
     )
     page = v3._upgrade_page(page)
-    return HTMLResponse(_upgrade_etsy_panel(page))
+    page = _upgrade_etsy_panel(page)
+    return HTMLResponse(_fix_activity_refresh(page))
