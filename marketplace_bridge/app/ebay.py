@@ -16,6 +16,27 @@ def _text(node, path: str, default=""):
     return found.text.strip() if found is not None and found.text else default
 
 
+class EbayListingUnavailable(RuntimeError):
+    """Raised when an item returned by the seller list can no longer be read."""
+
+
+_UNAVAILABLE_MESSAGES = (
+    "this listing was removed",
+    "listing was removed",
+    "intellectual property rights owner",
+    "item has been removed",
+    "item is no longer available",
+    "listing is no longer available",
+    "invalid item",
+    "item not found",
+)
+
+
+def is_unavailable_listing_error(message: str) -> bool:
+    value = str(message or "").strip().lower()
+    return any(fragment in value for fragment in _UNAVAILABLE_MESSAGES)
+
+
 class EbayClient:
     """Reads the seller's complete active inventory through eBay Trading API.
 
@@ -67,10 +88,15 @@ class EbayClient:
         <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
           <ItemID>{html.escape(item_id)}</ItemID><DetailLevel>ReturnAll</DetailLevel><IncludeItemSpecifics>true</IncludeItemSpecifics>
         </GetItemRequest>'''
-        root = await self._call("GetItem", body)
+        try:
+            root = await self._call("GetItem", body)
+        except RuntimeError as exc:
+            if is_unavailable_listing_error(str(exc)):
+                raise EbayListingUnavailable(str(exc)) from exc
+            raise
         item = root.find("e:Item", NS)
         if item is None:
-            raise RuntimeError(f"eBay returned no item for {item_id}")
+            raise EbayListingUnavailable(f"eBay returned no item for {item_id}")
         return self._normalise(item)
 
     def _normalise(self, item: ET.Element) -> Product:
@@ -107,7 +133,6 @@ class EbayClient:
             sku = _text(item, "e:SKU") or f"EBAY-{item_id}"
             variants = [Variant(source_id=sku, sku=sku, price=str(Decimal(price)), quantity=quantity)]
 
-        # Match eBay variation pictures to Shopify variant media by option value.
         for picture_set in item.findall("e:Variations/e:Pictures/e:VariationSpecificPictureSet", NS):
             value = _text(picture_set, "e:VariationSpecificValue")
             url = _text(picture_set, "e:PictureURL")
@@ -132,4 +157,3 @@ class EbayClient:
             images=images, variants=variants, attributes=attributes,
             source_url=f"https://www.ebay.co.uk/itm/{item_id}",
         )
-

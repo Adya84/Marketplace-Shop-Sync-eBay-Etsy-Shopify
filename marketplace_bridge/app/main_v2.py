@@ -7,12 +7,12 @@ import httpx
 from fastapi import Form, HTTPException
 
 from . import main as legacy
-from .ebay import EbayClient
+from .ebay import EbayClient, EbayListingUnavailable
 from .ebay_broker import EbayOAuthBroker, parse_authorization_result
 from .settings import settings
 
 app = legacy.app
-app.version = "0.0.24"
+app.version = "0.0.25"
 broker = EbayOAuthBroker(settings.ebay_oauth_broker_url)
 _legacy_ensure_ebay_access_token = legacy.ensure_ebay_access_token
 
@@ -91,9 +91,48 @@ async def _ensure_ebay_access_token(credentials: dict, environment: str = "produ
     return await _legacy_ensure_ebay_access_token(credentials, environment)
 
 
-# The existing import worker looks up this global at run time, so replacing it
-# upgrades token renewal without duplicating the import implementation.
 legacy.ensure_ebay_access_token = _ensure_ebay_access_token
+
+
+async def run_ebay_import(job_id: int):
+    try:
+        legacy.db.update_job(job_id, status="running", message="Reading active eBay listings")
+        credential = legacy.get_credentials("ebay")
+        credential = await _ensure_ebay_access_token(credential, settings.ebay_environment)
+        legacy.save_credentials("ebay", credential)
+        client = EbayClient(credential["access_token"], settings.ebay_environment)
+        ids = await client.list_active_ids()
+        legacy.db.update_job(job_id, total=len(ids), message=f"Found {len(ids)} listings")
+
+        imported = 0
+        skipped = 0
+        for index, item_id in enumerate(ids, 1):
+            try:
+                product = await client.get_product(item_id)
+            except EbayListingUnavailable as exc:
+                skipped += 1
+                legacy.log.info("Skipping unavailable eBay listing %s: %s", item_id, exc)
+                legacy.db.update_job(
+                    job_id,
+                    progress=index,
+                    message=f"Skipped unavailable eBay listing {item_id}; continuing",
+                )
+                continue
+
+            legacy.db.save_product(product)
+            imported += 1
+            legacy.db.update_job(job_id, progress=index, message=f"Imported {product.title}")
+
+        message = f"Imported {imported} listings"
+        if skipped:
+            message += f"; skipped {skipped} removed/unavailable listing{'s' if skipped != 1 else ''}"
+        legacy.db.update_job(job_id, status="complete", progress=len(ids), message=message)
+    except Exception as exc:
+        legacy.log.exception("eBay import failed")
+        legacy.db.update_job(job_id, status="failed", message=str(exc)[:500])
+
+
+legacy.run_ebay_import = run_ebay_import
 
 
 _original_render_dashboard = legacy.render_dashboard
