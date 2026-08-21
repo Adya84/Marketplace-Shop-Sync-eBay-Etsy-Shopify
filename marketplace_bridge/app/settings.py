@@ -14,7 +14,12 @@ class Settings:
         "EBAY_OAUTH_BROKER_URL",
         "https://shop-sync-ebay-oauth.graffidoodle.workers.dev",
     )
+    etsy_oauth_broker_url: str = os.getenv(
+        "ETSY_OAUTH_BROKER_URL",
+        "https://shop-sync-ebay-oauth.graffidoodle.workers.dev",
+    )
     shopify_api_version: str = os.getenv("SHOPIFY_API_VERSION", "2026-07")
+    # Kept only for backwards compatibility with pre-0.0.29 Etsy connections.
     etsy_redirect_uri: str = os.getenv(
         "ETSY_REDIRECT_URI",
         "https://adya84.github.io/Marketplace-Shop-Sync-eBay-Etsy-Shopify/etsy-callback.html",
