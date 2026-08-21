@@ -14,6 +14,7 @@ from .settings import settings
 app = legacy.app
 app.version = "0.0.24"
 broker = EbayOAuthBroker(settings.ebay_oauth_broker_url)
+_legacy_ensure_ebay_access_token = legacy.ensure_ebay_access_token
 
 
 def _drop_route(path: str, method: str) -> None:
@@ -87,7 +88,7 @@ async def finish_ebay_oauth(oauth_result: str = Form(...)):
 async def _ensure_ebay_access_token(credentials: dict, environment: str = "production") -> dict:
     if credentials.get("oauth_mode") == "publisher_broker":
         return await broker.ensure_access_token(credentials, environment)
-    return await legacy.ensure_ebay_access_token(credentials, environment)
+    return await _legacy_ensure_ebay_access_token(credentials, environment)
 
 
 # The existing import worker looks up this global at run time, so replacing it
