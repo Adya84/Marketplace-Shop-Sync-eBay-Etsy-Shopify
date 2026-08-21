@@ -12,7 +12,7 @@ class Settings:
     ebay_environment: str = os.getenv("EBAY_ENVIRONMENT", "production")
     ebay_oauth_broker_url: str = os.getenv(
         "EBAY_OAUTH_BROKER_URL",
-        "https://shop-sync-ebay-compliance.zesty-flame-5295.chatgpt.site",
+        "https://shop-sync-ebay-oauth.graffidoodle.workers.dev",
     )
     shopify_api_version: str = os.getenv("SHOPIFY_API_VERSION", "2026-07")
     etsy_redirect_uri: str = os.getenv(
