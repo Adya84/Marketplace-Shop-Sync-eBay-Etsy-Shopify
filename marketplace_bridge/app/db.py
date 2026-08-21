@@ -114,7 +114,7 @@ class Database:
     def list_products(self):
         with self.connect() as conn:
             products = [dict(row) for row in conn.execute(
-                """SELECT p.id,p.source,p.source_id,p.title,p.updated_at,
+                """SELECT p.id,p.source,p.source_id,p.title,p.payload,p.updated_at,
                 m.destination_id AS shopify_id,
                 CASE WHEN d.source IS NULL THEN 0 ELSE 1 END AS completed_hidden
                 FROM products p LEFT JOIN mappings m
@@ -137,6 +137,27 @@ class Database:
             product["duplicate_approved_shopify"] = (product["source"], product["source_id"], "shopify") in approvals
             product["duplicate_approved_etsy"] = (product["source"], product["source_id"], "etsy") in approvals
             product["duplicate_approved_ebay"] = (product["source"], product["source_id"], "ebay") in approvals
+            try:
+                payload = json.loads(product.pop("payload") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            variants = payload.get("variants") or []
+            quantities = []
+            skus = []
+            for variant in variants:
+                try:
+                    quantities.append(max(0, int(variant.get("quantity") or 0)))
+                except (TypeError, ValueError):
+                    quantities.append(0)
+                sku = str(variant.get("sku") or "").strip()
+                if sku:
+                    skus.append(sku)
+            product["stock_total"] = sum(quantities)
+            product["variant_count"] = len(variants)
+            product["skus"] = list(dict.fromkeys(skus))
+            product["sku_summary"] = ", ".join(product["skus"][:3])
+            if len(product["skus"]) > 3:
+                product["sku_summary"] += f" +{len(product['skus']) - 3} more"
         return products
 
     def duplicate_is_blocked(self, source: str, source_id: str, destination: str) -> bool:
@@ -197,4 +218,3 @@ class Database:
     def clear_finished_jobs(self):
         with self.connect() as conn:
             conn.execute("DELETE FROM jobs WHERE status IN ('complete', 'failed')")
-

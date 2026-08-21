@@ -124,12 +124,23 @@ class EbayClient:
             for choice in variation.findall("e:VariationSpecifics/e:NameValueList", NS):
                 options.append(OptionValue(_text(choice, "e:Name"), _text(choice, "e:Value")))
             sku = _text(variation, "e:SKU") or f"EBAY-{item_id}-{index + 1}"
-            quantity = max(0, int(_text(variation, "e:Quantity", "0")) - int(_text(variation, "e:SellingStatus/e:QuantitySold", "0")))
+            listed_quantity = int(_text(variation, "e:Quantity", "0"))
+            sold_quantity = int(_text(variation, "e:SellingStatus/e:QuantitySold", "0"))
+            quantity = max(0, listed_quantity - sold_quantity)
             variants.append(Variant(
                 source_id=sku, sku=sku, price=_text(variation, "e:StartPrice", price), quantity=quantity, options=options
             ))
         if not variants:
-            quantity = max(0, int(_text(item, "e:Quantity", "0")) - int(_text(item, "e:SellingStatus/e:QuantitySold", "0")))
+            # QuantityAvailable is the clearest remaining-stock field for normal
+            # fixed-price listings when eBay returns it. Fall back to the documented
+            # Quantity - QuantitySold calculation for listings where it is absent.
+            quantity_available = _text(item, "e:QuantityAvailable", "")
+            if quantity_available != "":
+                quantity = max(0, int(quantity_available))
+            else:
+                listed_quantity = int(_text(item, "e:Quantity", "0"))
+                sold_quantity = int(_text(item, "e:SellingStatus/e:QuantitySold", "0"))
+                quantity = max(0, listed_quantity - sold_quantity)
             sku = _text(item, "e:SKU") or f"EBAY-{item_id}"
             variants = [Variant(source_id=sku, sku=sku, price=str(Decimal(price)), quantity=quantity)]
 
