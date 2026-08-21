@@ -1,5 +1,20 @@
 # Shop Sync Changelog
 
+## 0.0.32
+
+- Added automatic recovery for marketplace catalogue imports after an add-on crash, restart or Home Assistant reboot.
+- Persisted `running`/`queued` eBay, Etsy, Shopify and TikTok import jobs are restarted safely from the beginning when Shop Sync comes back online.
+- Recovered imports reuse the existing job record so the LIVE Activity panel no longer remains permanently stuck on a dead import.
+- Marketplace write/export jobs are deliberately **not** replayed automatically after a restart; they are marked failed/interrupted so the user can review them before retrying and avoid duplicate listings.
+- Switched the add-on runtime to `main_v7` and bumped the Home Assistant app version to `0.0.32`.
+
+## 0.0.31
+
+- Added Shopify → Etsy/eBay reverse-sync planning and marketplace-specific adaptation.
+- Added Etsy automatic splitting when a Shopify product has more than two variation groups.
+- Added existing-listing checks using confirmed mappings, SKU, title and matching product photos before overwrite/update is offered.
+- Added per-marketplace defaults and review-before-update behaviour for reverse exports.
+
 ## 0.0.30
 
 - Added publisher-managed Shopify OAuth so normal users no longer need to create a Shopify app or enter Client ID/client-secret values into Shop Sync.
