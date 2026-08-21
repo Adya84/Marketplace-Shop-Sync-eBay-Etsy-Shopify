@@ -37,7 +37,7 @@ def cloud_dashboard(request: Request):
         '<div class="nav"><a href="/dashboard">Dashboard</a><a href="/catalog">Product workspace</a>',
         1,
     )
-    return HTMLResponse(page, status_code=response.status_code, headers=dict(response.headers))
+    return HTMLResponse(page, status_code=response.status_code)
 
 
 _previous_lifespan = app.router.lifespan_context
