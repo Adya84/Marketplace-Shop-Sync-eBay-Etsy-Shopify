@@ -7,20 +7,27 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
+from . import runtime_patches  # noqa: F401 - installs cloud-only import fixes
+from . import sync_routes
 from .db import SessionLocal
-from .main import app, current_context, dashboard as base_dashboard
+from .main import app, current_context
 from .models import SyncJob
+from .original_ui import render_control_centre, router as original_ui_router
 from .sync_routes import router as sync_router
-from .sync_routes import run_import, update_job
 
 app.include_router(sync_router)
+app.include_router(original_ui_router)
 
-# Keep the cloud dashboard from main.py, but add a direct Product workspace
-# navigation item without changing any Home Assistant UI/source files.
+# The hosted edition keeps account/login handling from cloud/main.py, but once
+# signed in it presents the same single Shop Sync control-centre layout as the
+# Home Assistant edition rather than a separate dashboard/catalogue design.
 app.router.routes[:] = [
     route
     for route in app.router.routes
-    if not (getattr(route, "path", None) == "/dashboard" and "GET" in getattr(route, "methods", set()))
+    if not (
+        getattr(route, "path", None) in {"/dashboard", "/catalog"}
+        and "GET" in (getattr(route, "methods", set()) or set())
+    )
 ]
 
 
@@ -28,16 +35,14 @@ app.router.routes[:] = [
 def cloud_dashboard(request: Request):
     if not current_context(request):
         return RedirectResponse("/login", status_code=303)
-    response = base_dashboard(request)
-    if not isinstance(response, HTMLResponse):
-        return response
-    page = response.body.decode("utf-8")
-    page = page.replace(
-        '<div class="nav"><a href="/dashboard">Dashboard</a>',
-        '<div class="nav"><a href="/dashboard">Dashboard</a><a href="/catalog">Product workspace</a>',
-        1,
-    )
-    return HTMLResponse(page, status_code=response.status_code)
+    return render_control_centre(request)
+
+
+@app.get("/catalog", response_class=HTMLResponse)
+def cloud_catalog(request: Request):
+    if not current_context(request):
+        return RedirectResponse("/login", status_code=303)
+    return render_control_centre(request)
 
 
 _previous_lifespan = app.router.lifespan_context
@@ -48,15 +53,9 @@ _recovery_tasks: set[asyncio.Task] = set()
 async def recovery_lifespan(application):
     async with _previous_lifespan(application):
         with SessionLocal() as db:
-            stale = db.scalars(
-                select(SyncJob).where(SyncJob.status.in_(["running", "queued"]))
-            ).all()
+            stale = db.scalars(select(SyncJob).where(SyncJob.status.in_(["running", "queued"]))).all()
             stale_jobs = [
-                {
-                    "id": job.id,
-                    "workspace_id": job.workspace_id,
-                    "kind": job.kind,
-                }
+                {"id": job.id, "workspace_id": job.workspace_id, "kind": job.kind}
                 for job in stale
             ]
 
@@ -65,24 +64,21 @@ async def recovery_lifespan(application):
             if kind.endswith("_import"):
                 provider = kind.removesuffix("_import")
                 if provider in {"shopify", "etsy", "ebay"}:
-                    update_job(
+                    sync_routes.update_job(
                         job["id"],
                         status="queued",
                         progress="0/0",
-                        message="Recovered after restart — safely restarting this import from the beginning.",
+                        message="Recovered after Shop Sync restart — restarting this import safely from the beginning.",
                     )
                     task = asyncio.create_task(
-                        run_import(job["id"], job["workspace_id"], provider),
+                        sync_routes.run_import(job["id"], job["workspace_id"], provider),
                         name=f"shopsync-cloud-recover-{provider}-{job['id']}",
                     )
                     _recovery_tasks.add(task)
                     task.add_done_callback(_recovery_tasks.discard)
                     continue
 
-            # Never blindly retry marketplace writes after a restart. A remote
-            # marketplace may have accepted the request before the connection
-            # dropped, which could create a duplicate if retried automatically.
-            update_job(
+            sync_routes.update_job(
                 job["id"],
                 status="failed",
                 message="Interrupted by a Shop Sync restart. Review this export before retrying so a listing is not duplicated.",
