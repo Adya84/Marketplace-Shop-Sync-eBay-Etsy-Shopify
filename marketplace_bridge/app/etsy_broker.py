@@ -87,34 +87,37 @@ class EtsyOAuthBroker:
         updated["broker_key"] = payload["broker_key"]
         return updated
 
-    async def get(self, access_token: str, broker_key: str, path: str, params=None) -> dict:
-        async with httpx.AsyncClient(timeout=60) as client:
+    async def request(
+        self,
+        access_token: str,
+        broker_key: str,
+        method: str,
+        path: str,
+        *,
+        params=None,
+        form=None,
+        json_data=None,
+    ) -> dict:
+        async with httpx.AsyncClient(timeout=90) as client:
             response = await client.post(
-                f"{self.base_url}/api/etsy/api/get",
+                f"{self.base_url}/api/etsy/api/request",
                 json={
                     "access_token": access_token,
                     "broker_key": broker_key,
+                    "method": method.upper(),
                     "path": path,
                     "params": params or {},
+                    "form": form,
+                    "json": json_data,
                 },
             )
             response.raise_for_status()
+            if not response.content:
+                return {}
             return response.json()
 
-    async def post(self, access_token: str, broker_key: str, path: str, data=None, params=None) -> dict:
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                f"{self.base_url}/api/etsy/api/post",
-                json={
-                    "access_token": access_token,
-                    "broker_key": broker_key,
-                    "path": path,
-                    "params": params or {},
-                    "data": data or {},
-                },
-            )
-            response.raise_for_status()
-            return response.json()
+    async def get(self, access_token: str, broker_key: str, path: str, params=None) -> dict:
+        return await self.request(access_token, broker_key, "GET", path, params=params)
 
 
 class BrokerEtsyClient(EtsyClient):
@@ -155,27 +158,35 @@ class BrokerEtsyClient(EtsyClient):
         self.broker_key = updated["broker_key"]
         self.expires_at = float(updated["expires_at"])
 
-    async def _get(self, path: str, params=None):
+    async def request(self, method: str, path: str, *, params=None, form=None, json_data=None) -> dict:
         if self.refresh_token and (not self.expires_at or time.time() >= self.expires_at - 300):
             await self._refresh()
         try:
-            return await self.broker.get(self.access_token, self.broker_key, path, params)
+            return await self.broker.request(
+                self.access_token,
+                self.broker_key,
+                method,
+                path,
+                params=params,
+                form=form,
+                json_data=json_data,
+            )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 401 and self.refresh_token and self.refresh_key:
                 await self._refresh()
-                return await self.broker.get(self.access_token, self.broker_key, path, params)
+                return await self.broker.request(
+                    self.access_token,
+                    self.broker_key,
+                    method,
+                    path,
+                    params=params,
+                    form=form,
+                    json_data=json_data,
+                )
             raise
 
-    async def _post(self, path: str, data=None, params=None):
-        if self.refresh_token and (not self.expires_at or time.time() >= self.expires_at - 300):
-            await self._refresh()
-        try:
-            return await self.broker.post(self.access_token, self.broker_key, path, data, params)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 401 and self.refresh_token and self.refresh_key:
-                await self._refresh()
-                return await self.broker.post(self.access_token, self.broker_key, path, data, params)
-            raise
+    async def _get(self, path: str, params=None):
+        return await self.request("GET", path, params=params)
 
     def credential_payload(self) -> dict:
         return {
