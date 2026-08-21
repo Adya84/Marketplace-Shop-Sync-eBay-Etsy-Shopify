@@ -10,6 +10,10 @@ class Settings:
     data_dir: Path = Path(os.getenv("BRIDGE_DATA_DIR", "./data"))
     ebay_marketplace: str = os.getenv("EBAY_MARKETPLACE", "EBAY_GB")
     ebay_environment: str = os.getenv("EBAY_ENVIRONMENT", "production")
+    ebay_oauth_broker_url: str = os.getenv(
+        "EBAY_OAUTH_BROKER_URL",
+        "https://shop-sync-ebay-oauth.graffidoodle.workers.dev",
+    )
     shopify_api_version: str = os.getenv("SHOPIFY_API_VERSION", "2026-07")
     etsy_redirect_uri: str = os.getenv(
         "ETSY_REDIRECT_URI",
@@ -23,4 +27,3 @@ class Settings:
 
 settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)
-
