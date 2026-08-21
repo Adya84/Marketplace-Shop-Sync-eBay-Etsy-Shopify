@@ -101,6 +101,21 @@ class EtsyOAuthBroker:
             response.raise_for_status()
             return response.json()
 
+    async def post(self, access_token: str, broker_key: str, path: str, data=None, params=None) -> dict:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{self.base_url}/api/etsy/api/post",
+                json={
+                    "access_token": access_token,
+                    "broker_key": broker_key,
+                    "path": path,
+                    "params": params or {},
+                    "data": data or {},
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+
 
 class BrokerEtsyClient(EtsyClient):
     """Etsy client that keeps the publisher API secret on the hosted broker."""
@@ -149,6 +164,17 @@ class BrokerEtsyClient(EtsyClient):
             if exc.response.status_code == 401 and self.refresh_token and self.refresh_key:
                 await self._refresh()
                 return await self.broker.get(self.access_token, self.broker_key, path, params)
+            raise
+
+    async def _post(self, path: str, data=None, params=None):
+        if self.refresh_token and (not self.expires_at or time.time() >= self.expires_at - 300):
+            await self._refresh()
+        try:
+            return await self.broker.post(self.access_token, self.broker_key, path, data, params)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 401 and self.refresh_token and self.refresh_key:
+                await self._refresh()
+                return await self.broker.post(self.access_token, self.broker_key, path, data, params)
             raise
 
     def credential_payload(self) -> dict:
