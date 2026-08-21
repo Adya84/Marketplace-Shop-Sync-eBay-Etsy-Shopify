@@ -8,3 +8,4 @@ argon2-cffi==25.1.0
 cryptography==45.0.6
 email-validator==2.2.0
 itsdangerous==2.2.0
+httpx==0.28.1
