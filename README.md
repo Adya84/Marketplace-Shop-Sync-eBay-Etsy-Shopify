@@ -6,7 +6,7 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is a Home Assistant OS app for importing marketplace listings and creating Shopify drafts. Version `0.0.25` uses a simple eBay connection: **normal users do not need an eBay Developer account, App ID, Cert ID, RuName or manually generated eBay token**. They connect their own seller account through the publisher-managed Shop Sync eBay OAuth application.
+Shop Sync is a Home Assistant OS app for importing marketplace listings and creating Shopify drafts. Version `0.0.26` uses a simple eBay connection: **normal users do not need an eBay Developer account, App ID, Cert ID, RuName or manually generated eBay token**. They connect their own seller account through the publisher-managed Shop Sync eBay OAuth application.
 
 > [!IMPORTANT]
 > Shop Sync is still a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous order/stock synchronisation and reverse marketplace publishing are still planned work.
@@ -56,7 +56,7 @@ https://adya84.github.io/Marketplace-Shop-Sync-eBay-Etsy-Shopify/etsy-callback.h
 
 TikTok Shop currently requires the app key, app secret, seller access token and shop cipher from TikTok Shop Partner Center. A development app can only authorise development shops until TikTok approves the app for live use.
 
-## What version 0.0.25 does
+## What version 0.0.26 does
 
 - Imports active eBay UK listings using OAuth user consent.
 - Uses the publisher-managed Shop Sync eBay OAuth application for end-user sign-in.
@@ -67,6 +67,13 @@ TikTok Shop currently requires the app key, app secret, seller access token and 
 - Imports eBay titles, HTML descriptions, category data, item specifics, photos, variations, SKUs, prices and available quantities.
 - Skips eBay listings that eBay has removed or made unavailable instead of aborting the whole catalogue import.
 - Reports how many removed/unavailable eBay listings were skipped when the import completes.
+- Adds catalogue pagination at 50 listings per page so large shops can browse the complete import.
+- Adds search by title, SKU or listing ID.
+- Adds marketplace filtering for eBay, Etsy, Shopify and TikTok.
+- Shows imported SKU, variant count and total available stock in the catalogue.
+- Preserves bulk selection and Shopify draft creation across the paginated catalogue.
+- Writes imported stock to Shopify when creating drafts and verifies the quantity after Shopify stores it.
+- Uses the source variant order as a fallback when Shopify does not immediately return the same SKU, preventing valid stock from silently becoming zero.
 - Imports active Etsy listings through Open API v3 and renews Etsy OAuth tokens automatically.
 - Imports active TikTok Shop products.
 - Imports the Shopify catalogue for duplicate review and comparison.
@@ -95,11 +102,11 @@ Shop Sync is a custom Home Assistant app, not a HACS integration.
 
 ## Updating an existing installation
 
-For users upgrading from `0.0.24` or earlier:
+For users upgrading from `0.0.25` or earlier:
 
 1. Open **Home Assistant > Settings > Apps > Shop Sync**.
 2. Refresh the custom app repository if Home Assistant does not immediately show the new version.
-3. Install/update to `0.0.25` or later.
+3. Install/update to `0.0.26` or later.
 4. Restart Shop Sync.
 5. Reopen the Shop Sync sidebar page.
 
@@ -176,12 +183,14 @@ TikTok's live seller access depends on the app's approval/publication status.
 2. Select the matching import action under **Import catalogues**.
 3. Watch **Activity** until the import completes.
 4. eBay listings that have been removed or become unavailable are skipped automatically; the rest of the import continues.
-5. Review imported products and any entries under **Review duplicate titles**.
-6. Start with one product and select **Create Shopify draft**.
-7. Check the resulting Shopify draft carefully, including title, description, photos, variants, SKUs, prices and inventory.
-8. Once satisfied, select multiple products to queue additional drafts.
+5. Use the **Ready to send** catalogue controls to search by title/SKU/listing ID, filter by marketplace and move through pages of 50 listings.
+6. Check the **Stock** column before sending a product. For products with variants the catalogue shows the combined available stock and the variant count.
+7. Review imported products and any entries under **Review duplicate titles**.
+8. Start with one product and select **Create Shopify draft**.
+9. Check the resulting Shopify draft carefully, including title, description, photos, variants, SKUs, prices and inventory.
+10. Once satisfied, select multiple products to queue additional drafts.
 
-Shop Sync deliberately creates Shopify drafts rather than immediately publishing products.
+Shop Sync deliberately creates Shopify drafts rather than immediately publishing products. Version `0.0.26` verifies Shopify's stored inventory after each draft transfer; if Shopify does not store the expected stock value, the transfer job is marked failed instead of silently reporting success with zero stock.
 
 ## eBay publisher / OAuth broker setup
 
@@ -241,12 +250,16 @@ See [`oauth_broker/README.md`](oauth_broker/README.md) for operator/deployment d
 
 ## Troubleshooting
 
-- **Home Assistant still shows the old eBay App ID/Cert ID/RuName form:** update Shop Sync to `0.0.25` or later and restart the app.
+- **Home Assistant still shows the old eBay App ID/Cert ID/RuName form:** update Shop Sync to `0.0.26` or later and restart the app.
 - **Connect eBay cannot open:** check the broker health URL and confirm it reports `configured:true`.
 - **Authorization result rejected:** select **Connect eBay** again; callback results expire and are single-use.
 - **eBay state mismatch:** discard the result and start a fresh connection.
 - **eBay approval returns to the wrong page:** the publisher should verify both eBay accepted/declined URLs point to the Cloudflare callback.
 - **Removed eBay listing stops an import:** update to `0.0.25` or later. Removed/unavailable listings are skipped and the import continues.
+- **Not all imported listings appear on screen:** update to `0.0.26` or later and use the catalogue page controls. The Ready to send table displays 50 listings per page.
+- **Need to find a specific imported listing:** use the Ready to send search field with the title, SKU or marketplace listing ID.
+- **eBay stock shows as zero before transfer:** re-import the eBay catalogue and verify the Stock column. Shop Sync uses eBay's available quantity fields and falls back to listed quantity minus quantity sold where required.
+- **Shopify draft stock becomes zero:** update to `0.0.26` or later. Inventory is written during draft creation and read back for verification; a mismatch now fails the transfer job instead of being hidden.
 - **eBay import later fails authentication:** reconnect if the seller revoked access or the long-lived refresh token expired.
 - **Shopify says `write_products` is required:** verify the active Shopify app version includes `write_products`, reinstall it and restart Shop Sync.
 - **Etsy authorization fails:** start a fresh Etsy connection because its authorization code is single-use.
