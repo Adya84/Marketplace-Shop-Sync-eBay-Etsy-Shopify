@@ -1,5 +1,17 @@
 # Shop Sync Changelog
 
+## 0.0.30
+
+- Added publisher-managed Shopify OAuth so normal users no longer need to create a Shopify app or enter Client ID/client-secret values into Shop Sync.
+- Added Shopify authorization through the hosted Shop Sync OAuth broker using the permanent `.myshopify.com` store domain supplied by the user.
+- Added Shopify callback HMAC verification on the hosted broker before issuing the signed Shop Sync authorization result.
+- Added hosted Shopify authorization-code exchange using the publisher Shopify app credentials stored only on Cloudflare.
+- Shop Sync now stores the authorised Shopify store access token locally and uses it for Shopify catalogue imports and draft creation.
+- Preserved compatibility with Shopify credentials created by earlier Shop Sync versions.
+- Removed Shopify Client ID/client-secret fields from the normal Shop Sync UI and replaced them with **Connect Shopify** plus the authorization-result flow used by eBay/Etsy.
+- Switched the add-on runtime to `main_v5` and bumped the Home Assistant app version to `0.0.30`.
+- Updated the root README, installation guides, troubleshooting and OAuth broker documentation for the shared eBay + Etsy + Shopify hosted OAuth architecture.
+
 ## 0.0.29
 
 - Added publisher-managed Etsy OAuth so normal users no longer need an Etsy developer app, keystring or shared secret.
