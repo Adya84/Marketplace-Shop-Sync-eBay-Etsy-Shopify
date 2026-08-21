@@ -6,7 +6,7 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is a Home Assistant OS app for importing marketplace listings and creating Shopify drafts. Version `0.0.24` introduces a much simpler eBay connection: **normal users do not need an eBay Developer account, App ID, Cert ID, RuName or manually generated eBay token**. They connect their own seller account through the publisher-managed Shop Sync eBay OAuth application.
+Shop Sync is a Home Assistant OS app for importing marketplace listings and creating Shopify drafts. Version `0.0.25` uses a simple eBay connection: **normal users do not need an eBay Developer account, App ID, Cert ID, RuName or manually generated eBay token**. They connect their own seller account through the publisher-managed Shop Sync eBay OAuth application.
 
 > [!IMPORTANT]
 > Shop Sync is still a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous order/stock synchronisation and reverse marketplace publishing are still planned work.
@@ -56,14 +56,17 @@ https://adya84.github.io/Marketplace-Shop-Sync-eBay-Etsy-Shopify/etsy-callback.h
 
 TikTok Shop currently requires the app key, app secret, seller access token and shop cipher from TikTok Shop Partner Center. A development app can only authorise development shops until TikTok approves the app for live use.
 
-## What version 0.0.24 does
+## What version 0.0.25 does
 
 - Imports active eBay UK listings using OAuth user consent.
 - Uses the publisher-managed Shop Sync eBay OAuth application for end-user sign-in.
+- Forces a fresh eBay login when **Connect eBay** is selected so the correct seller account can be chosen.
 - Removes all eBay developer credential fields from the normal user flow.
 - Stores each seller's eBay access/refresh credentials locally in the Shop Sync Home Assistant app data.
 - Renews short-lived eBay access tokens automatically through the hosted OAuth broker.
 - Imports eBay titles, HTML descriptions, category data, item specifics, photos, variations, SKUs, prices and available quantities.
+- Skips eBay listings that eBay has removed or made unavailable instead of aborting the whole catalogue import.
+- Reports how many removed/unavailable eBay listings were skipped when the import completes.
 - Imports active Etsy listings through Open API v3 and renews Etsy OAuth tokens automatically.
 - Imports active TikTok Shop products.
 - Imports the Shopify catalogue for duplicate review and comparison.
@@ -92,15 +95,15 @@ Shop Sync is a custom Home Assistant app, not a HACS integration.
 
 ## Updating an existing installation
 
-For users upgrading from `0.0.23` or earlier:
+For users upgrading from `0.0.24` or earlier:
 
 1. Open **Home Assistant > Settings > Apps > Shop Sync**.
 2. Refresh the custom app repository if Home Assistant does not immediately show the new version.
-3. Install/update to `0.0.24` or later.
+3. Install/update to `0.0.25` or later.
 4. Restart Shop Sync.
 5. Reopen the Shop Sync sidebar page.
 
-The old eBay App ID, Cert ID and RuName fields should no longer be required for a normal eBay connection.
+The old eBay App ID, Cert ID and RuName fields are no longer required for a normal eBay connection.
 
 ## Connect eBay — normal user instructions
 
@@ -110,7 +113,7 @@ Users installing Shop Sync do **not** need to register with the eBay Developer P
 2. Select **Connect eBay**.
 3. Shop Sync asks the hosted Shop Sync OAuth service for the official eBay sign-in URL.
 4. Sign in to the eBay seller account you want Shop Sync to access.
-5. Review the official eBay consent screen and select **Agree and Continue**.
+5. If eBay displays the Shop Sync permission screen, review it and select **Agree and Continue**. eBay may reuse an existing grant for an account that has already approved Shop Sync.
 6. eBay redirects to the Shop Sync callback page.
 7. Select **Copy authorization result**.
 8. Return to Shop Sync.
@@ -172,10 +175,11 @@ TikTok's live seller access depends on the app's approval/publication status.
 1. Connect Shopify and at least one source marketplace.
 2. Select the matching import action under **Import catalogues**.
 3. Watch **Activity** until the import completes.
-4. Review imported products and any entries under **Review duplicate titles**.
-5. Start with one product and select **Create Shopify draft**.
-6. Check the resulting Shopify draft carefully, including title, description, photos, variants, SKUs, prices and inventory.
-7. Once satisfied, select multiple products to queue additional drafts.
+4. eBay listings that have been removed or become unavailable are skipped automatically; the rest of the import continues.
+5. Review imported products and any entries under **Review duplicate titles**.
+6. Start with one product and select **Create Shopify draft**.
+7. Check the resulting Shopify draft carefully, including title, description, photos, variants, SKUs, prices and inventory.
+8. Once satisfied, select multiple products to queue additional drafts.
 
 Shop Sync deliberately creates Shopify drafts rather than immediately publishing products.
 
@@ -237,11 +241,12 @@ See [`oauth_broker/README.md`](oauth_broker/README.md) for operator/deployment d
 
 ## Troubleshooting
 
-- **Home Assistant still shows the old eBay App ID/Cert ID/RuName form:** update Shop Sync to `0.0.24` or later and restart the app.
+- **Home Assistant still shows the old eBay App ID/Cert ID/RuName form:** update Shop Sync to `0.0.25` or later and restart the app.
 - **Connect eBay cannot open:** check the broker health URL and confirm it reports `configured:true`.
 - **Authorization result rejected:** select **Connect eBay** again; callback results expire and are single-use.
 - **eBay state mismatch:** discard the result and start a fresh connection.
 - **eBay approval returns to the wrong page:** the publisher should verify both eBay accepted/declined URLs point to the Cloudflare callback.
+- **Removed eBay listing stops an import:** update to `0.0.25` or later. Removed/unavailable listings are skipped and the import continues.
 - **eBay import later fails authentication:** reconnect if the seller revoked access or the long-lived refresh token expired.
 - **Shopify says `write_products` is required:** verify the active Shopify app version includes `write_products`, reinstall it and restart Shop Sync.
 - **Etsy authorization fails:** start a fresh Etsy connection because its authorization code is single-use.
