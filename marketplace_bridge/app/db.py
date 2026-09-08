@@ -156,6 +156,21 @@ class Database:
             row = conn.execute("SELECT payload FROM products WHERE source=? AND source_id=?", (source, source_id)).fetchone()
             return json.loads(row[0]) if row else None
 
+    def delete_product(self, source: str, source_id: str) -> bool:
+        """Remove an imported listing and its local Shop Sync bookkeeping."""
+        with self.connect() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM products WHERE source=? AND source_id=?",
+                (source, source_id),
+            ).fetchone()
+            if not exists:
+                return False
+            conn.execute("DELETE FROM duplicate_approvals WHERE source=? AND source_id=?", (source, source_id))
+            conn.execute("DELETE FROM completed_dismissals WHERE source=? AND source_id=?", (source, source_id))
+            conn.execute("DELETE FROM mappings WHERE source=? AND source_id=?", (source, source_id))
+            conn.execute("DELETE FROM products WHERE source=? AND source_id=?", (source, source_id))
+            return True
+
     def save_mapping(self, source: str, source_id: str, destination: str, destination_id: str, payload: dict):
         with self.connect() as conn:
             conn.execute(

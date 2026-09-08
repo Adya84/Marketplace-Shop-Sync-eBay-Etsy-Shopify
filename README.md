@@ -6,12 +6,12 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.22` implements **eBay UK, Etsy or TikTok Shop to Shopify**, imports the Shopify master catalogue, and adds destination-specific duplicate-title review.
+Shop Sync is an early-stage Home Assistant OS app for transferring marketplace listings. Version `0.0.25` implements **eBay UK, Etsy or TikTok Shop to Shopify**, imports the Shopify master catalogue, and adds destination-specific duplicate-title review.
 
 > [!IMPORTANT]
 > This is a development preview. Test with a small number of listings and review every Shopify draft before publishing it. Continuous stock/order synchronisation and multi-user onboarding are not implemented yet.
 
-## What version 0.0.22 does
+## What version 0.0.25 does
 
 - Reads active listings from the connected eBay UK seller account.
 - Imports listing titles, HTML descriptions, eBay category details and item specifics.
@@ -37,6 +37,7 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Imports the Shopify product catalogue so it can be used as the master comparison source and prepared for Shopify-to-marketplace transfers.
 - Detects duplicate titles across imported Etsy, eBay and Shopify catalogues after ignoring case, punctuation and repeated spacing.
 - Holds duplicate candidates in **Review duplicate titles** and excludes them from individual and bulk draft creation until approved for that destination.
+- Adds a **Delete** button to duplicate-review, ready-to-send and completed rows. This deletes only Shop Sync's local imported record; it never deletes the original marketplace listing or Shopify draft.
 - Refreshes Activity automatically every 60 seconds without reloading connection forms.
 
 ## Not implemented yet
@@ -47,12 +48,13 @@ Shop Sync is an early-stage Home Assistant OS app for transferring marketplace l
 - Etsy export and Shopify-to-Etsy transfer
 - Shopify-to-eBay transfer
 - Scheduled reconciliation, webhooks and automatic retries
-- Guided eBay OAuth onboarding for other sellers
 - A HACS companion integration
 
-The available draft creation routes in `0.0.22` are eBay UK, Etsy and TikTok Shop to Shopify. Shopify catalogue import and shared duplicate review are included; Shopify-to-marketplace draft creation remains planned work.
+The available draft creation routes in `0.0.25` are eBay UK, Etsy and TikTok Shop to Shopify. Shopify catalogue import and shared duplicate review are included; Shopify-to-marketplace draft creation remains planned work.
 
 ### TikTok Shop connection
+
+> **Eligibility warning:** TikTok currently restricts the Seller Developer route to eligible shops (in some cases requiring an assigned account manager), while its TikTok Shop Partner/TSP route requires an incorporated business and supporting company documents. A sole trader without TikTok Seller Developer approval cannot use Shop Sync's direct TikTok API connection. The official Shopify–TikTok sales channel remains the practical alternative.
 
 1. Create a TikTok Shop app in TikTok Shop Partner Center and request `seller.authorization.info` and `seller.product.basic`.
 2. Complete TikTok's app review. A development app can only authorise development shops; a live seller shop cannot connect until TikTok approves and publishes the app.
@@ -165,11 +167,27 @@ If Home Assistant still shows the installed and latest versions as identical, re
 
 ## Connect eBay
 
-Version `0.0.19` requires an eBay production OAuth user access token from an eBay Developer application. The token must be authorised for the seller account and permit access to its listings.
+Version `0.0.24` uses guided eBay OAuth. Ordinary users do not need an eBay Developer account, App ID, Dev ID, Cert ID, RuName, notification endpoint or manually generated token.
 
-Enter the token on the Shop Sync page and select **Test and save**. The app validates it by requesting the account's active listings before storing it.
+1. Open the Shop Sync page and select **Connect eBay**.
+2. Sign in on eBay's official consent page and approve Shop Sync.
+3. Select **Copy authorization result** on the Shop Sync callback page.
+4. Return to Home Assistant, paste the result into **Authorization result**, and select **Finish eBay connection**.
+5. Wait for eBay to show green **Connected**, then select **Import eBay listings**.
 
-Do not paste an eBay client secret into the user-token field. Guided eBay OAuth and automatic token refresh are planned for a later release.
+The hosted broker holds the single Shop Sync application's eBay credentials. It signs the short-lived connection state, exchanges authorization codes and renews access tokens, but does not retain seller tokens. Seller access and refresh tokens are returned to the requesting Home Assistant installation and encrypted in its private app data. The one-use authorization result expires after 15 minutes.
+
+The Shop Sync owner configures the hosted broker once with the production `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, `EBAY_RUNAME` and a random `EBAY_OAUTH_STATE_SECRET`. The eBay RuName's production Accept URL must be:
+
+```text
+https://shop-sync-ebay-compliance.zesty-flame-5295.chatgpt.site/api/ebay/oauth/callback
+```
+
+The Marketplace Account Deletion endpoint remains:
+
+```text
+https://shop-sync-ebay-compliance.zesty-flame-5295.chatgpt.site/api/ebay/account-deletion
+```
 
 ## Shopify connection reference
 
@@ -243,13 +261,11 @@ The repository root is a Home Assistant custom add-on repository. The installabl
 
 ## Roadmap
 
-1. Guided eBay OAuth with hosted callback support
-2. Preview and validation before Shopify export
-3. Bulk draft creation, rate limiting and retries
-4. Shopify-master stock reconciliation and eBay order ingestion
-5. Etsy export and additional transfer directions
-6. Multi-merchant OAuth, tenant isolation and onboarding
-7. Optional HACS companion exposing Home Assistant entities and actions
+1. Preview and validation before Shopify export
+2. Bulk draft creation, rate limiting and retries
+3. Shopify-master stock reconciliation and eBay order ingestion
+4. Etsy export and additional transfer directions
+5. Optional HACS companion exposing Home Assistant entities and actions
 
 ## Support
 
