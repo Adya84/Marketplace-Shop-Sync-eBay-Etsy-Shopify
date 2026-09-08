@@ -49,7 +49,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Shop Sync", version="0.0.23", lifespan=lifespan)
+app = FastAPI(title="Shop Sync", version="0.0.33", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -367,6 +367,13 @@ def approve_duplicate(destination: str, source: str, source_id: str):
     return {"approved": True}
 
 
+@app.delete("/api/products/{source}/{source_id}")
+def delete_product(source: str, source_id: str):
+    if not db.delete_product(source, source_id):
+        raise HTTPException(404, "Product not found")
+    return {"deleted": True}
+
+
 @app.post("/api/products/{source}/{source_id}/shopify")
 def export_shopify(source: str, source_id: str, background_tasks: BackgroundTasks):
     get_credentials("shopify")
@@ -436,10 +443,10 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     completed = [p for p in products if p["source"] != "shopify" and p["shopify_id"] and not p.get("completed_hidden", False)]
     pending_rows = "".join(f'''<tr><td><input class="product-select" type="checkbox" value="{esc(p["source"])}:{esc(p["source_id"])}" aria-label="Select {esc(p["title"])}"></td><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
       <td><span class="pill">Imported</span></td>
-      <td><button onclick="send('api/products/{p["source"]}/{p["source_id"]}/shopify')">Create Shopify draft</button></td></tr>''' for p in pending)
+      <td><button onclick="send('api/products/{p["source"]}/{p["source_id"]}/shopify')">Create Shopify draft</button> <button class="danger" onclick="deleteProduct('{esc(p['source'])}','{esc(p['source_id'])}')">Delete</button></td></tr>''' for p in pending)
     completed_rows = "".join(f'''<tr><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td>
-      <td><span class="pill ok">Completed</span></td><td><small>{esc(p['shopify_id'])}</small></td></tr>''' for p in completed)
-    duplicate_rows = "".join(f'''<tr><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td><td><span class="pill">Review required</span></td><td><button onclick="approveDuplicate('shopify','{esc(p['source'])}','{esc(p['source_id'])}')">Approve for Shopify</button></td></tr>''' for p in duplicate_review)
+      <td><span class="pill ok">Completed</span></td><td><small>{esc(p['shopify_id'])}</small></td><td><button class="danger" onclick="deleteProduct('{esc(p['source'])}','{esc(p['source_id'])}')">Delete</button></td></tr>''' for p in completed)
+    duplicate_rows = "".join(f'''<tr><td>{esc(p['title'])}<small>{esc(p['source'].title())} {esc(p['source_id'])}</small></td><td><span class="pill">Review required</span></td><td><button onclick="approveDuplicate('shopify','{esc(p['source'])}','{esc(p['source_id'])}')">Approve for Shopify</button> <button class="danger" onclick="deleteProduct('{esc(p['source'])}','{esc(p['source_id'])}')">Delete</button></td></tr>''' for p in duplicate_review)
     job_rows = "".join(f"<tr><td>{esc(j['kind'].replace('_',' ').title())}</td><td>{esc(j['status'])}</td><td>{j['progress']}/{j['total']}</td><td>{esc(j['message'])}</td></tr>" for j in jobs)
     return f'''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shop Sync</title>
     <style>
@@ -448,6 +455,7 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     h1{{font-size:28px;margin:0}}h2{{font-size:18px;margin:0 0 16px}}p,small{{color:var(--muted)}}.hero{{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}}
     .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}}.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}}
     input{{width:100%;background:#09111e;color:var(--text);border:1px solid var(--line);padding:11px;border-radius:8px;margin:6px 0 12px}}input[type=checkbox]{{width:18px;height:18px;margin:0;accent-color:var(--blue)}}button,.button-link{{background:var(--blue);border:0;color:#04111e;font-weight:700;border-radius:8px;padding:10px 14px;cursor:pointer;text-decoration:none;display:inline-block}}
+    button.danger{{background:#d94b5f;color:white}}
     .status{{display:flex;gap:8px;align-items:center}}.dot{{width:10px;height:10px;background:#e85d75;border-radius:50%}}.dot.ok{{background:var(--green)}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px;border-top:1px solid var(--line)}}small{{display:block;margin-top:3px}}.pill{{background:#2d3b50;padding:4px 8px;border-radius:99px;font-size:12px}}.pill.ok{{background:#145c47;color:#9effd8}}
     .footer{{text-align:center;color:var(--muted);font-size:12px;padding:10px 0 4px}}.footer a{{color:var(--muted)}}
     @media(max-width:650px){{main{{padding:16px}}.hero{{display:block}}table{{display:block;overflow:auto}}}}
@@ -465,7 +473,7 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     <section class="card"><h2>Import catalogues</h2><button onclick="send('api/import/ebay')" {'disabled' if not ebay_connected else ''}>Import eBay listings</button> <button onclick="send('api/import/etsy')" {'disabled' if not etsy_connected else ''}>Import Etsy listings</button> <button onclick="send('api/import/shopify')" {'disabled' if not shopify_connected else ''}>Import Shopify products</button> <button onclick="send('api/import/tiktok')" {'disabled' if not tiktok_connected else ''}>Import TikTok Shop listings</button></section>
     <section class="card"><h2>Review duplicate titles</h2><p>Matching titles are held here and excluded from bulk draft creation until approved for the selected destination.</p><table><thead><tr><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{duplicate_rows or '<tr><td colspan="3">No duplicate titles need review.</td></tr>'}</tbody></table></section>
     <section class="card"><div class="hero"><h2>Ready to send</h2><div><button onclick="toggleAll()">Select all</button> <button onclick="createSelected()">Create selected drafts</button></div></div><table><thead><tr><th>Select</th><th>Listing</th><th>Status</th><th>Action</th></tr></thead><tbody>{pending_rows or '<tr><td colspan="4">No listings waiting to be sent.</td></tr>'}</tbody></table></section>
-    <section class="card"><div class="hero"><h2>Completed</h2><button onclick="clearCompleted()">Clear completed</button></div><table><thead><tr><th>Listing</th><th>Status</th><th>Shopify product</th></tr></thead><tbody>{completed_rows or '<tr><td colspan="3">No completed drafts yet.</td></tr>'}</tbody></table><small>Clearing this list does not delete Shopify products or their transfer mappings.</small></section>
+    <section class="card"><div class="hero"><h2>Completed</h2><button onclick="clearCompleted()">Clear completed</button></div><table><thead><tr><th>Listing</th><th>Status</th><th>Shopify product</th><th>Action</th></tr></thead><tbody>{completed_rows or '<tr><td colspan="4">No completed drafts yet.</td></tr>'}</tbody></table><small>Clearing this list does not delete Shopify products or their transfer mappings.</small></section>
     <section class="card"><div class="hero"><h2>Activity</h2><div><button onclick="refreshActivity()">Refresh activity</button> <button onclick="clearActivity()">Clear activity</button></div></div><table><thead><tr><th>Job</th><th>Status</th><th>Progress</th><th>Message</th></tr></thead><tbody id="activity-rows">{job_rows or '<tr><td colspan="4">No activity yet.</td></tr>'}</tbody></table><small>Updates automatically every 60 seconds.</small></section>
     <footer class="footer">Copyright © 2026 Adrian Apel · All rights reserved · <a href="https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></footer>
     <script>
@@ -529,6 +537,11 @@ def render_dashboard(products, jobs, ebay_connected, etsy_connected, shopify_con
     async function approveDuplicate(destination,source,sourceId){{
       if(!confirm(`Approve this duplicate for ${{destination}} draft creation?`))return;
       const r=await fetch(endpoint(`api/duplicates/${{destination}}/${{source}}/${{sourceId}}/approve`),{{method:'POST'}});
+      if(!r.ok)alert(await r.text());else location.reload();
+    }}
+    async function deleteProduct(source,sourceId){{
+      if(!confirm('Delete this imported record from Shop Sync? The original marketplace listing and any Shopify draft will not be deleted.'))return;
+      const r=await fetch(endpoint(`api/products/${{source}}/${{sourceId}}`),{{method:'DELETE'}});
       if(!r.ok)alert(await r.text());else location.reload();
     }}
     function activityCell(row,text){{

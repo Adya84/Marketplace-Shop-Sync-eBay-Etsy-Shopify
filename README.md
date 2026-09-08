@@ -6,7 +6,9 @@
   <img src="marketplace_bridge/logo.png" alt="Shop Sync marketplace synchronisation logo" width="420">
 </p>
 
-Shop Sync is a Home Assistant OS app for importing marketplace listings and creating Shopify drafts. Version `0.0.30` gives normal users the same simple hosted OAuth connection experience for **eBay, Etsy and Shopify**.
+Shop Sync is a Home Assistant OS app for importing marketplace listings and creating Shopify drafts. Version `0.0.33` adds per-listing Delete controls to duplicate review, ready-to-send and completed sections.
+
+Deleting a listing from Shop Sync only removes its local imported record and transfer metadata. It does not delete the original marketplace listing or any Shopify draft/product.
 
 Normal users do **not** need an eBay Developer account, Etsy developer app, or Shopify app Client ID/secret. They connect the seller/store accounts they are authorised to use through the publisher-managed Shop Sync OAuth service.
 
