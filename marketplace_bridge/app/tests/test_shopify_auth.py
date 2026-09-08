@@ -27,10 +27,10 @@ def test_dashboard_submits_connections_through_ingress_path():
     assert "location.pathname.endsWith('/')" in html
     assert "fetch(endpoint(form.getAttribute('action'))" in html
     assert 'action="api/settings/shopify"' in html
-    assert 'action="api/settings/ebay"' in html
+    assert 'action="api/oauth/ebay/start"' in html
     assert 'action="api/oauth/etsy/start"' in html
     assert 'action="api/oauth/etsy/finish"' in html
-    assert "Version 0.0.22" in html
+    assert "Version 0.0.33" in html
     assert "setInterval(refreshActivity,60000)" in html
     assert 'id="activity-rows"' in html
     assert "Refresh activity" in html
@@ -94,4 +94,16 @@ def test_completed_list_can_be_cleared_without_deleting_mappings():
     assert "api/completed/clear" in html
     assert "Sent" in html
     assert "Hidden" not in html
+
+
+def test_dashboard_has_delete_action_in_each_listing_section():
+    html = render_dashboard([
+        {"title": "Duplicate", "source": "etsy", "source_id": "1", "shopify_id": None, "is_duplicate": True},
+        {"title": "Ready", "source": "ebay", "source_id": "2", "shopify_id": None},
+        {"title": "Completed", "source": "tiktok", "source_id": "3", "shopify_id": "gid://shopify/Product/3"},
+    ], [], True, True, True, True)
+
+    assert html.count('class="danger"') == 3
+    assert "method:'DELETE'" in html
+    assert "original marketplace listing" in html
 
