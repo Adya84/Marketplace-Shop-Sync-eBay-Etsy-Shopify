@@ -14,15 +14,17 @@ class OrderSync:
                 existing=await self.shopify.find(order.order_id)
             except Exception:
                 # A failed lookup is not evidence that an order doesn't exist.
-                state='uncertain' if previous and previous['state'] in {'claimed','uncertain'} else 'review'
-                self.store.record(order,state,'Shopify lookup failed; no order was created')
+                if previous and previous['state']=='validation_review':
+                    self.store.record(order,'validation_review',previous['message'],previous['shopify_id'])
+                else:
+                    state='uncertain' if previous and previous['state'] in {'claimed','uncertain'} else 'review'
+                    self.store.record(order,state,'Shopify lookup failed; no order was created')
                 return
             if existing:
                 state='review' if existing.get('cancelledAt') or order.status == 'Cancelled' else 'linked'
                 message='Existing Shopify order found'
-                reconcile_existing=previous and (previous['state'] in {'claimed','uncertain'} or
-                    (previous['state']=='review' and previous.get('shopify_id')==existing['id'] and
-                     previous.get('message','').startswith('Reconciled Shopify order status or total differs')))
+                reconcile_existing=previous and (previous['state'] in {'claimed','uncertain','validation_review'} or
+                    (previous['state']=='review' and previous.get('shopify_id')==existing['id']))
                 if state=='linked' and reconcile_existing:
                     total=(existing.get('totalPriceSet') or {}).get('shopMoney') or {}
                     try: total_matches=total.get('currencyCode')==order.currency and money(total.get('amount'))==order.amount
@@ -30,7 +32,7 @@ class OrderSync:
                     if (existing.get('displayFinancialStatus')!='PAID' or
                             existing.get('displayFulfillmentStatus')!='UNFULFILLED' or
                             not total_matches):
-                        state='review'
+                        state='validation_review'
                         message='Reconciled Shopify order status or total differs from TikTok; verify before shipping'
                 if state=='linked' and previous and previous['state']=='tracking_uncertain':
                     state='tracking_uncertain'
@@ -55,7 +57,7 @@ class OrderSync:
 
     async def sync_tracking(self,order,browser,*,writes=False):
         previous=self.store.get(order.shop_id,order.order_id)
-        if not previous or not previous.get('shopify_id') or previous['state'] in {'uncertain','claimed'}: return
+        if not previous or not previous.get('shopify_id') or previous['state'] in {'uncertain','claimed','validation_review'}: return
         async with self.lock:
             try:
                 data=await self.shopify.tracking(previous['shopify_id'])

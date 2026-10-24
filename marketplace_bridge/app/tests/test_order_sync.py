@@ -80,10 +80,12 @@ async def test_uncertain_creation_with_mismatched_total_stays_in_review(setup):
                   'displayFulfillmentStatus':'UNFULFILLED','totalPriceSet':{'shopMoney':{'amount':'7.00','currencyCode':'GBP'}}}
     await sync.import_order(order,writes=True)
     row=db.get(order.shop_id,order.order_id)
-    assert row['state']=='review' and 'differs' in row['message']
+    assert row['state']=='validation_review' and 'differs' in row['message']
     assert row['shopify_id']==api.existing['id'] and not api.created
     await sync.import_order(order,writes=True)
-    assert db.get(order.shop_id,order.order_id)['state']=='review'
+    assert db.get(order.shop_id,order.order_id)['state']=='validation_review'
+    db.source_failure(order)
+    assert db.get(order.shop_id,order.order_id)['state']=='validation_review'
 
 
 @pytest.mark.asyncio

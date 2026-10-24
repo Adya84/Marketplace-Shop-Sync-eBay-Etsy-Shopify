@@ -70,6 +70,8 @@ class OrderStore:
 
     def source_failure(self,order):
         previous=self.get(order.shop_id,order.order_id)
+        if previous and previous['state']=='validation_review':
+            self.record(order,'validation_review',previous['message'],previous['shopify_id']); return
         state=previous['state'] if previous and previous['state'] in {'claimed','uncertain','tracking_uncertain'} else 'review'
         self.record(order,state,'TikTok detail could not be verified; inspect in browser')
 
