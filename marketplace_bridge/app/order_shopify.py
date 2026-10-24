@@ -4,13 +4,13 @@ from .order_models import OrderProblem, money
 
 FIND_ORDER = '''query BridgeFindOrder($query: String!) {
   orders(first: 10, query: $query) {
-    nodes { id tags cancelledAt }
+    nodes { id tags cancelledAt displayFinancialStatus displayFulfillmentStatus totalPriceSet{shopMoney{amount currencyCode}} }
     pageInfo { hasNextPage }
   }
 }'''
 CREATE_ORDER = '''mutation BridgeCreateOrder($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
   orderCreate(order: $order, options: $options) {
-    order { id name }
+    order { id name displayFinancialStatus displayFulfillmentStatus totalPriceSet{shopMoney{amount currencyCode}} }
     userErrors { field message }
   }
 }'''
@@ -25,10 +25,6 @@ CUSTOMER_FIND='''query BridgeCustomer($query:String!){customers(first:10,query:$
  nodes{id defaultEmailAddress{emailAddress}} pageInfo{hasNextPage}}}'''
 CUSTOMER_CREATE='''mutation BridgeCustomerCreate($input:CustomerInput!){customerCreate(input:$input){
  customer{id} userErrors{field message}}}'''
-DRAFT_CREATE='''mutation BridgeDraftCreate($input:DraftOrderInput!){draftOrderCreate(input:$input){
- draftOrder{id totalPriceSet{shopMoney{amount currencyCode}}} userErrors{field message}}}'''
-DRAFT_COMPLETE='''mutation BridgeDraftComplete($id:ID!){draftOrderComplete(id:$id){
- draftOrder{order{id name displayFinancialStatus displayFulfillmentStatus}} userErrors{field message}}}'''
 
 
 def build_order(source):
@@ -53,18 +49,18 @@ def build_order(source):
 
 
 class OrderShopify:
-    def __init__(self,client,store=None): self.client=client; self.store=store
+    def __init__(self,client): self.client=client
 
     async def check_scopes(self,*,writes=True):
         data=await self.client.graphql(SCOPES)
         scopes={x['handle'] for x in data['currentAppInstallation']['accessScopes']}
         required={'read_orders'}
         if writes:
-            required|={'read_customers','write_draft_orders','read_draft_orders','write_quick_sale',
-                       'read_quick_sale','read_marketplace_orders','write_customers'}
-        available=scopes|({'read_orders'} if 'write_orders' in scopes else set())
+            required|={'write_customers','write_orders'}
+        available=scopes|({'read_orders'} if 'write_orders' in scopes else set())|(
+            {'read_customers'} if 'write_customers' in scopes else set())
         if not required<=available:
-            raise OrderProblem('Shopify app permissions are incomplete. The publisher must add order, customer and draft-order permissions before reconnecting')
+            raise OrderProblem('Shopify app permissions are incomplete. The publisher must add order and customer permissions before reconnecting')
         return scopes
 
     async def find(self,order_id):
@@ -78,7 +74,8 @@ class OrderShopify:
         return matches[0] if matches else None
 
     async def create(self,source):
-        payload=build_order(source)['order']
+        variables=build_order(source)
+        payload=variables['order']
         customer=None
         if source.email:
             # Validation above excludes quotes/whitespace; escape Shopify search syntax too.
@@ -98,31 +95,14 @@ class OrderShopify:
             if result['userErrors'] or not result.get('customer'):
                 raise OrderProblem('Shopify customer creation needs review')
             customer=result['customer']
-        draft={'presentmentCurrencyCode':source.currency,'purchasingEntity':{'customerId':customer['id']},
-               'shippingAddress':source.address,'useCustomerDefaultAddress':False,
-               'tags':payload['tags'],'note':payload['note'],
-               'acceptAutomaticDiscounts':False,'allowDiscountCodesInCheckout':False,
-               'lineItems':[{'title':i['title']+(' — '+i['variantTitle'] if i['variantTitle'] else ''),
-                 'quantity':i['quantity'],'sku':i['sku'],'requiresShipping':True,'taxable':False,
-                 'weight':i['weight'],'originalUnitPriceWithCurrency':{
-                     'amount':i['priceSet']['shopMoney']['amount'],'currencyCode':source.currency}}
-                 for i in payload['lineItems']],
-               'shippingLine':{'title':'TikTok seller shipping','priceWithCurrency':{
-                   'amount':str(source.shipping),'currencyCode':source.currency}}}
-        # No invoice/receipt is sent, no inventory-backed variant is claimed,
-        # and completing the draft records the payment already taken on TikTok.
-        result=(await self.client.graphql(DRAFT_CREATE,{'input':draft}))['draftOrderCreate']
-        if result['userErrors'] or not result.get('draftOrder'):
-            raise OrderProblem('Shopify draft creation needs review')
-        created=result['draftOrder']
-        if self.store: self.store.checkpoint_draft(source,created['id'])
-        total=created['totalPriceSet']['shopMoney']
-        if total['currencyCode']!=source.currency or money(total['amount'])!=source.amount:
-            raise OrderProblem('Shopify draft total differs from TikTok; review draft before completion')
-        result=(await self.client.graphql(DRAFT_COMPLETE,{'id':created['id']}))['draftOrderComplete']
-        order=(result.get('draftOrder') or {}).get('order')
+        payload['customer']={'toAssociate':{'id':customer['id']}}
+        result=(await self.client.graphql(CREATE_ORDER,variables))['orderCreate']
+        order=result.get('order')
         if result['userErrors'] or not order or order['displayFinancialStatus']!='PAID' or order['displayFulfillmentStatus']!='UNFULFILLED':
-            raise OrderProblem('Shopify draft completion needs review')
+            raise OrderProblem('Shopify order creation needs review')
+        total=order['totalPriceSet']['shopMoney']
+        if total['currencyCode']!=source.currency or money(total['amount'])!=source.amount:
+            raise OrderProblem('Shopify order total differs from TikTok; review order before shipping')
         return order
 
     async def tracking(self,shopify_id):

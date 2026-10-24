@@ -8,7 +8,7 @@ The native TikTok sales channel is preferable when its product mappings work: it
 
 - Home Assistant OS/Supervised app with authenticated Ingress. The order page and remote browser reject direct-port access. No public VNC or browser-debugging port is published.
 - amd64 or aarch64 Linux with Chromium sandbox support. Existing armv7 catalogue use is retained; the browser feature is unavailable there. The Chromium sandbox is not disabled automatically.
-- An offline Shopify connection with the scopes Shopify requires for this workflow: `read_orders`, `read_customers`, `write_customers`, `write_draft_orders`, `read_draft_orders`, `write_quick_sale`, `read_quick_sale`, and `read_marketplace_orders`. The current publisher OAuth broker does not request these scopes yet; its app registration and broker must be updated, then the store must reconnect and approve them. Until then, the import controls will report incomplete permissions and will not create orders. Browser sign-in and the ChatGPT Shopify connector are not credentials that this Home Assistant app can reuse.
+- An offline Shopify connection with `write_orders`, `read_customers`, and `write_customers`. `write_orders` also grants order read access. The current publisher OAuth broker does not request these scopes yet; its app registration and broker must be updated, then the store must reconnect and approve them. Until then, the import controls will report incomplete permissions and will not create orders. Browser sign-in and the ChatGPT Shopify connector are not credentials that this Home Assistant app can reuse.
 - Chromium profile, orders database and existing credential key are in the private `/config` directory. Treat app backups as private. The existing SecretBox protects stored payloads against casual disclosure, but its key sits beside the database; this does not protect against a compromised host or exposed backup.
 
 ## Install and verify before unattended use
@@ -27,7 +27,7 @@ The shipping queue is traversed across all pages and compared with its To ship c
 ## Verification status
 
 - Python tests cover validation, address preservation, existing tracking, concurrent durable claims, exact native tag detection, ambiguous creation, tracking uncertainty, Ingress/CSRF and websocket denial.
-- Shopify customer and draft-order operations validated against Admin GraphQL 2026-07. The current production publisher broker scope set is still insufficient, and the expanded-scope reconnect has not been completed.
+- Shopify customer and order operations validated against Admin GraphQL 2026-07. The current production publisher broker scope set is still insufficient, and the expanded-scope reconnect has not been completed.
 - Real read-only Seller Centre pages were used to ground selectors and parser layout. Synthetic fixtures contain no customer addresses.
 - No local Docker engine or Home Assistant host was available for the container/browser/Ingress smoke test. Container startup, sandbox compatibility, complete live Selenium scans and unattended import remain unverified.
 - On 24 October, ten requested current orders were separately imported through the connected Shopify app as #1026–#1035. This manual run does not verify Home Assistant deployment. A subsequent native TikTok order arrived as #1036 for the previously mapped 30 × 20 cm grooved variant.

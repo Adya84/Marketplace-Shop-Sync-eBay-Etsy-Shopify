@@ -1,5 +1,5 @@
 import asyncio
-from .order_models import OrderProblem
+from .order_models import OrderProblem, money
 
 
 class OrderSync:
@@ -19,9 +19,22 @@ class OrderSync:
                 return
             if existing:
                 state='review' if existing.get('cancelledAt') or order.status == 'Cancelled' else 'linked'
+                message='Existing Shopify order found'
+                reconcile_existing=previous and (previous['state'] in {'claimed','uncertain'} or
+                    (previous['state']=='review' and previous.get('shopify_id')==existing['id'] and
+                     previous.get('message','').startswith('Reconciled Shopify order status or total differs')))
+                if state=='linked' and reconcile_existing:
+                    total=(existing.get('totalPriceSet') or {}).get('shopMoney') or {}
+                    try: total_matches=total.get('currencyCode')==order.currency and money(total.get('amount'))==order.amount
+                    except OrderProblem: total_matches=False
+                    if (existing.get('displayFinancialStatus')!='PAID' or
+                            existing.get('displayFulfillmentStatus')!='UNFULFILLED' or
+                            not total_matches):
+                        state='review'
+                        message='Reconciled Shopify order status or total differs from TikTok; verify before shipping'
                 if state=='linked' and previous and previous['state']=='tracking_uncertain':
                     state='tracking_uncertain'
-                self.store.record(order,state,'Existing Shopify order found',existing['id'])
+                self.store.record(order,state,message,existing['id'])
                 return
             if previous and (previous.get('shopify_id') or previous['state'] in {'claimed','uncertain'}):
                 self.store.record(order,'uncertain','Previous creation must be reconciled before another import')

@@ -12,7 +12,8 @@ class Shopify:
         return self.existing
     async def create(self,order):
         self.created.append(order)
-        self.existing={'id':'gid://shopify/Order/123','cancelledAt':None}
+        self.existing={'id':'gid://shopify/Order/123','cancelledAt':None,'displayFinancialStatus':'PAID',
+                       'displayFulfillmentStatus':'UNFULFILLED','totalPriceSet':{'shopMoney':{'amount':order.total,'currencyCode':order.currency}}}
         return self.existing
 
 
@@ -69,6 +70,20 @@ async def test_unresolved_ambiguous_create_never_blindly_retries(setup):
     db.record(sample(),'uncertain','Response lost')
     await sync.import_order(sample(),writes=True)
     assert not api.created
+
+
+@pytest.mark.asyncio
+async def test_uncertain_creation_with_mismatched_total_stays_in_review(setup):
+    db,api,sync=setup; order=sample()
+    db.record(order,'uncertain','Response lost')
+    api.existing={'id':'gid://shopify/Order/123','cancelledAt':None,'displayFinancialStatus':'PAID',
+                  'displayFulfillmentStatus':'UNFULFILLED','totalPriceSet':{'shopMoney':{'amount':'7.00','currencyCode':'GBP'}}}
+    await sync.import_order(order,writes=True)
+    row=db.get(order.shop_id,order.order_id)
+    assert row['state']=='review' and 'differs' in row['message']
+    assert row['shopify_id']==api.existing['id'] and not api.created
+    await sync.import_order(order,writes=True)
+    assert db.get(order.shop_id,order.order_id)['state']=='review'
 
 
 @pytest.mark.asyncio

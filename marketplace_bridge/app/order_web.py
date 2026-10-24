@@ -39,7 +39,7 @@ def mount_orders(app,core,client_factory):
                 if domain!=config['target_shop'] or not domain:
                     raise OrderProblem('Shopify destination changed or is not verified; check settings')
                 writes=(manual or config['enabled']) and not dry
-                shopify=OrderShopify(client_factory(credential),store)
+                shopify=OrderShopify(client_factory(credential))
                 await shopify.check_scopes(writes=writes)
                 await asyncio.to_thread(browser.start)
                 ids=await asyncio.to_thread(browser.scan_ids)
@@ -121,10 +121,8 @@ def mount_orders(app,core,client_factory):
             address=payload.get('address',{})
             delivery=', '.join(str(address.get(k,'')) for k in ('firstName','lastName','address1','city','zip'))
             tracking='; '.join(f"{t['carrier']}: {t['number']}" for t in row['tracking'])
-            draft=store.draft_id(row['shop'],row['source_id'])
-            message=row['message']+(f' Review Shopify draft {draft.rsplit("/",1)[-1]}.' if draft and row['state'] in {'claimed','uncertain'} else '')
             rows.append('<tr>'+''.join('<td>'+esc(str(v))+'</td>' for v in
-                (row['source_id'],row['state'],summary,delivery,payload.get('total',''),message,tracking))+'</tr>')
+                (row['source_id'],row['state'],summary,delivery,payload.get('total',''),row['message'],tracking))+'</tr>')
         try: domain=core.get_credentials('shopify').get('shop_domain','')
         except Exception: domain=''
         boot=json.dumps({'csrf':csrf,'base':base},ensure_ascii=True).replace('<','\\u003c')
