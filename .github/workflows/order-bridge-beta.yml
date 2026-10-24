@@ -1,0 +1,24 @@
+name: Order bridge beta checks
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r marketplace_bridge/requirements.txt pytest pytest-asyncio
+      - run: python -m pytest marketplace_bridge/app/tests -q
+        env:
+          PYTHONPATH: marketplace_bridge
+      - run: python -m compileall -q marketplace_bridge/app
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22 -t shop-sync-orders:beta marketplace_bridge
