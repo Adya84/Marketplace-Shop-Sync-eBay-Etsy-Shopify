@@ -35,3 +35,38 @@ async def test_tracking_multiple_numbers_stays_multiple_for_review():
                 'fulfillments':[{'status':'SUCCESS','trackingInfo':[{'number':'A','company':'Royal Mail'},
                                                               {'number':'B','company':'Royal Mail'}]}]}}
     assert len((await OrderShopify(API()).tracking('gid://shopify/Order/1'))['shipments'])==2
+
+@pytest.mark.asyncio
+async def test_draft_import_attaches_existing_customer_and_completes_paid():
+    from app.order_shopify import CUSTOMER_FIND, DRAFT_CREATE, DRAFT_COMPLETE
+    calls=[]
+    class API:
+        async def graphql(self,query,variables=None):
+            calls.append((query,variables))
+            if query==CUSTOMER_FIND:
+                return {'customers':{'nodes':[{'id':'gid://shopify/Customer/1','defaultEmailAddress':{'emailAddress':'buyer@example.invalid'}}], 'pageInfo':{'hasNextPage':False}}}
+            if query==DRAFT_CREATE:
+                assert variables['input']['purchasingEntity']=={'customerId':'gid://shopify/Customer/1'}
+                assert variables['input']['lineItems'][0]['requiresShipping']
+                assert not variables['input']['lineItems'][0]['taxable']
+                return {'draftOrderCreate':{'draftOrder':{'id':'gid://shopify/DraftOrder/1','totalPriceSet':{'shopMoney':{'amount':'6.99','currencyCode':'GBP'}}},'userErrors':[]}}
+            if query==DRAFT_COMPLETE:
+                return {'draftOrderComplete':{'draftOrder':{'order':{'id':'gid://shopify/Order/1','name':'#1','displayFinancialStatus':'PAID','displayFulfillmentStatus':'UNFULFILLED'}},'userErrors':[]}}
+            raise AssertionError('Unexpected operation')
+    order=sample();order.email='buyer@example.invalid'
+    assert (await OrderShopify(API()).create(order))['name']=='#1'
+    assert [q for q,_ in calls]==[CUSTOMER_FIND,DRAFT_CREATE,DRAFT_COMPLETE]
+
+@pytest.mark.asyncio
+async def test_mismatched_draft_total_never_completes():
+    from app.order_shopify import CUSTOMER_CREATE, DRAFT_CREATE, DRAFT_COMPLETE
+    class API:
+        async def graphql(self,query,variables=None):
+            assert query!=DRAFT_COMPLETE
+            if query==CUSTOMER_CREATE:
+                return {'customerCreate':{'customer':{'id':'gid://shopify/Customer/1'},'userErrors':[]}}
+            if query==DRAFT_CREATE:
+                return {'draftOrderCreate':{'draftOrder':{'id':'gid://shopify/DraftOrder/1','totalPriceSet':{'shopMoney':{'amount':'7.00','currencyCode':'GBP'}}},'userErrors':[]}}
+            raise AssertionError('Unexpected operation')
+    with pytest.raises(OrderProblem,match='total'):
+        await OrderShopify(API()).create(sample())

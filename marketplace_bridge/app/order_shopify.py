@@ -21,6 +21,14 @@ ORDER_TRACKING = '''query BridgeOrderTracking($id: ID!) {
   }
 }'''
 SCOPES = '{ currentAppInstallation { accessScopes { handle } } }'
+CUSTOMER_FIND='''query BridgeCustomer($query:String!){customers(first:10,query:$query){
+ nodes{id defaultEmailAddress{emailAddress}} pageInfo{hasNextPage}}}'''
+CUSTOMER_CREATE='''mutation BridgeCustomerCreate($input:CustomerInput!){customerCreate(input:$input){
+ customer{id} userErrors{field message}}}'''
+DRAFT_CREATE='''mutation BridgeDraftCreate($input:DraftOrderInput!){draftOrderCreate(input:$input){
+ draftOrder{id totalPriceSet{shopMoney{amount currencyCode}}} userErrors{field message}}}'''
+DRAFT_COMPLETE='''mutation BridgeDraftComplete($id:ID!){draftOrderComplete(id:$id){
+ draftOrder{order{id name displayFinancialStatus displayFulfillmentStatus}} userErrors{field message}}}'''
 
 
 def build_order(source):
@@ -45,13 +53,18 @@ def build_order(source):
 
 
 class OrderShopify:
-    def __init__(self,client): self.client=client
+    def __init__(self,client,store=None): self.client=client; self.store=store
 
-    async def check_scopes(self):
+    async def check_scopes(self,*,writes=True):
         data=await self.client.graphql(SCOPES)
         scopes={x['handle'] for x in data['currentAppInstallation']['accessScopes']}
-        if 'write_orders' not in scopes:
-            raise OrderProblem('Reconnect Shopify after the publisher adds write_orders permission')
+        required={'read_orders'}
+        if writes:
+            required|={'read_customers','write_draft_orders','read_draft_orders','write_quick_sale',
+                       'read_quick_sale','read_marketplace_orders','write_customers'}
+        available=scopes|({'read_orders'} if 'write_orders' in scopes else set())
+        if not required<=available:
+            raise OrderProblem('Shopify app permissions are incomplete. The publisher must add order, customer and draft-order permissions before reconnecting')
         return scopes
 
     async def find(self,order_id):
@@ -65,12 +78,52 @@ class OrderShopify:
         return matches[0] if matches else None
 
     async def create(self,source):
-        data=await self.client.graphql(CREATE_ORDER,build_order(source))
-        result=data['orderCreate']
-        if result['userErrors'] or not result.get('order'):
-            # Do not expose API messages that may contain buyer data to ordinary logs.
-            raise OrderProblem('Shopify rejected order creation; review source fields and permissions')
-        return result['order']
+        payload=build_order(source)['order']
+        customer=None
+        if source.email:
+            # Validation above excludes quotes/whitespace; escape Shopify search syntax too.
+            email=source.email.replace('\\','\\\\').replace('"','\\"')
+            data=await self.client.graphql(CUSTOMER_FIND,{'query':f'email:"{email}"'})
+            connection=data['customers']
+            matches=[c for c in connection['nodes'] if
+                     (c.get('defaultEmailAddress') or {}).get('emailAddress','').casefold()==source.email.casefold()]
+            if len(matches)>1 or connection['pageInfo']['hasNextPage']:
+                raise OrderProblem('Customer identity is ambiguous; review before import')
+            if matches: customer=matches[0]
+        if not customer:
+            details={k:source.address.get(k,'') for k in ('firstName','lastName')}
+            if source.email: details['email']=source.email
+            details['tags']=[f'TikTokShopID:{source.shop_id}']
+            result=(await self.client.graphql(CUSTOMER_CREATE,{'input':details}))['customerCreate']
+            if result['userErrors'] or not result.get('customer'):
+                raise OrderProblem('Shopify customer creation needs review')
+            customer=result['customer']
+        draft={'presentmentCurrencyCode':source.currency,'purchasingEntity':{'customerId':customer['id']},
+               'shippingAddress':source.address,'useCustomerDefaultAddress':False,
+               'tags':payload['tags'],'note':payload['note'],
+               'acceptAutomaticDiscounts':False,'allowDiscountCodesInCheckout':False,
+               'lineItems':[{'title':i['title']+(' — '+i['variantTitle'] if i['variantTitle'] else ''),
+                 'quantity':i['quantity'],'sku':i['sku'],'requiresShipping':True,'taxable':False,
+                 'weight':i['weight'],'originalUnitPriceWithCurrency':{
+                     'amount':i['priceSet']['shopMoney']['amount'],'currencyCode':source.currency}}
+                 for i in payload['lineItems']],
+               'shippingLine':{'title':'TikTok seller shipping','priceWithCurrency':{
+                   'amount':str(source.shipping),'currencyCode':source.currency}}}
+        # No invoice/receipt is sent, no inventory-backed variant is claimed,
+        # and completing the draft records the payment already taken on TikTok.
+        result=(await self.client.graphql(DRAFT_CREATE,{'input':draft}))['draftOrderCreate']
+        if result['userErrors'] or not result.get('draftOrder'):
+            raise OrderProblem('Shopify draft creation needs review')
+        created=result['draftOrder']
+        if self.store: self.store.checkpoint_draft(source,created['id'])
+        total=created['totalPriceSet']['shopMoney']
+        if total['currencyCode']!=source.currency or money(total['amount'])!=source.amount:
+            raise OrderProblem('Shopify draft total differs from TikTok; review draft before completion')
+        result=(await self.client.graphql(DRAFT_COMPLETE,{'id':created['id']}))['draftOrderComplete']
+        order=(result.get('draftOrder') or {}).get('order')
+        if result['userErrors'] or not order or order['displayFinancialStatus']!='PAID' or order['displayFulfillmentStatus']!='UNFULFILLED':
+            raise OrderProblem('Shopify draft completion needs review')
+        return order
 
     async def tracking(self,shopify_id):
         data=await self.client.graphql(ORDER_TRACKING,{'id':shopify_id})

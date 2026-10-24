@@ -32,6 +32,7 @@ class SourceOrder:
     tracking: list[dict] = field(default_factory=list)
     tax: str = '0.00'
     delivery_instructions: str = ''
+    email: str = ''
 
     @property
     def amount(self):
@@ -49,6 +50,8 @@ class SourceOrder:
             raise OrderProblem('TikTok already has tracking; review before creating another shipment')
         if self.currency != 'GBP':
             raise OrderProblem('Only verified UK GBP orders are supported')
+        if self.email and (not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',self.email) or any(c in self.email for c in '*•…')):
+            raise OrderProblem('Customer email is masked or invalid; review before linking a customer')
         for key in ('firstName', 'address1', 'city', 'zip', 'countryCode'):
             value = str(self.address.get(key) or '').strip()
             if not value or any(c in value for c in ('*','•','…')):

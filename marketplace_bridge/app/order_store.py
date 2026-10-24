@@ -14,6 +14,8 @@ class OrderStore:
               message TEXT NOT NULL DEFAULT '', shopify_id TEXT, tracking TEXT NOT NULL DEFAULT '[]',
               updated_at TEXT NOT NULL, PRIMARY KEY(shop,source_id));
             CREATE TABLE IF NOT EXISTS order_bridge_settings (key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS order_bridge_drafts (shop TEXT,source_id TEXT,draft_id TEXT,
+              PRIMARY KEY(shop,source_id));
             ''')
 
     @contextmanager
@@ -72,6 +74,16 @@ class OrderStore:
         previous=self.get(order.shop_id,order.order_id)
         state=previous['state'] if previous and previous['state'] in {'claimed','uncertain','tracking_uncertain'} else 'review'
         self.record(order,state,'TikTok detail could not be verified; inspect in browser')
+
+    def checkpoint_draft(self,order,draft_id):
+        with self.connect() as conn:
+            conn.execute('INSERT OR REPLACE INTO order_bridge_drafts VALUES (?,?,?)',
+                         (order.shop_id,order.order_id,draft_id))
+
+    def draft_id(self,shop,source_id):
+        with self.connect() as conn:
+            row=conn.execute('SELECT draft_id FROM order_bridge_drafts WHERE shop=? AND source_id=?',(shop,source_id)).fetchone()
+            return row['draft_id'] if row else None
 
     def list_orders(self,limit=200):
         with self.connect() as conn:

@@ -56,6 +56,12 @@ def parse_detail(text,shop_id,order_id,weights):
     address={'firstName':name[0], 'lastName':name[1] if len(name)>1 else '',
              'address1':', '.join([*body[:-1],street.strip()]),'city':city.strip(),
              'zip':address_lines[-1].upper(),'countryCode':'GB'}
+    emails=[v for v in address_lines if '@' in v]
+    if len(emails)>1: raise OrderProblem('Customer email is ambiguous')
+    phones=[v for v in address_lines if v.startswith('(+')]
+    if len(phones)==1:
+        phone=re.sub(r'[()\s-]','',phones[0])
+        if re.fullmatch(r'\+\d{8,15}',phone): address['phone']=phone
     items=[]
     block=[v for v in values[values.index('Current order')+1:values.index('Order history')]
            if v not in {'Seller-signed creator','Affiliate creator'}]
@@ -76,7 +82,8 @@ def parse_detail(text,shop_id,order_id,weights):
     parcel=[m[1] for m in parcel if m]
     if parcel!=['1']: raise OrderProblem('Multiple or unknown parcels require review')
     return SourceOrder(str(shop_id),str(order_id),status,'GBP',amount('Total'),amount('Shipping fee after discounts'),
-                       address,items,'Fulfilled by seller' in values,delivery_instructions=instructions)
+                       address,items,'Fulfilled by seller' in values,delivery_instructions=instructions,
+                       email=emails[0] if emails else '')
 
 class TikTokBrowser:
     def __init__(self,profile,settings):
