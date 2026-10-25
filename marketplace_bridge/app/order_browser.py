@@ -209,6 +209,28 @@ class TikTokBrowser:
             return order
 
     def scan_ids(self):
+        from selenium.common.exceptions import StaleElementReferenceException
+        with self.lock:
+            for attempt in range(3):
+                try: return self._scan_ids()
+                except StaleElementReferenceException:
+                    if attempt==2:
+                        raise OrderProblem('TikTok queue kept changing while loading; next check will retry.') from None
+                    self.report(f'TikTok updated its queue; reading the fresh page (attempt {attempt+2} of 3)…')
+                    time.sleep(1)
+
+    def packing_option(self):
+        from selenium.webdriver.common.by import By
+        packing=[]
+        for label in self.driver.find_elements(By.CSS_SELECTOR,'label'):
+            if not label.is_displayed(): continue
+            match=re.fullmatch(r'Awaiting packing\s*\(\s*(\d+)\s*\)',label.text.strip())
+            if match and label.find_elements(By.CSS_SELECTOR,'input[type=radio]'):
+                packing.append((label,int(match[1])))
+        if len(packing)!=1: raise OrderProblem('Awaiting packing filter could not be verified')
+        return packing[0]
+
+    def _scan_ids(self):
         from selenium.webdriver.common.by import By
         with self.lock:
             # Use the observed Seller Centre queue URL. Home-page card labels
@@ -225,14 +247,13 @@ class TikTokBrowser:
             filters[0].click()
             self.wait(lambda:bool(self.find_text('Clear all','button')))
             self.click_text('Clear all')
-            packing=[]
-            for label in self.driver.find_elements(By.CSS_SELECTOR,'label'):
-                match=re.fullmatch(r'Awaiting packing\s*\(\s*(\d+)\s*\)',label.text.strip())
-                if label.is_displayed() and match and label.find_elements(By.CSS_SELECTOR,'input[type=radio]'):
-                    packing.append((label,int(match[1])))
-            if len(packing)!=1: raise OrderProblem('Awaiting packing filter could not be verified')
-            label,expected_count=packing[0]
+            label,expected_count=self.packing_option()
             label.click()
+            # React can replace the clicked label immediately. Read its new
+            # instance rather than dereferencing the pre-click DOM node.
+            label,current_count=self.packing_option()
+            if current_count!=expected_count:
+                raise OrderProblem('Awaiting packing queue changed; rescan required')
             if not label.find_elements(By.CSS_SELECTOR,'input[type=radio]')[0].is_selected():
                 raise OrderProblem('Awaiting packing filter was not selected')
             self.click_text('Apply')
@@ -250,9 +271,12 @@ class TikTokBrowser:
                 if not ids and not any(v in text for v in ('No orders','No data','No results')): return None
                 return ids
             result=[]; seen=set()
+            def ready_page():
+                current=page()
+                return (current,) if current is not None else False
             for _ in range(500):
                 # Wrap empty pages so WebDriverWait does not treat [] as loading.
-                ids=self.wait(lambda:(page(),) if page() is not None else False)[0]
+                ids=self.wait(ready_page)[0]
                 if not ids and expected_count==0: return []
                 signature=tuple(ids)
                 if signature in seen: raise OrderProblem('Order pagination repeated; scan incomplete')
@@ -264,7 +288,10 @@ class TikTokBrowser:
                     if len(result)!=expected_count: raise OrderProblem('Awaiting packing queue changed; rescan required')
                     return result
                 nxt.click()
-                self.wait(lambda:page() is not None and tuple(page())!=signature)
+                def changed_page():
+                    current=page()
+                    return current is not None and tuple(current)!=signature
+                self.wait(changed_page)
             raise OrderProblem('Order pagination limit reached; scan incomplete')
 
     def submit_tracking(self,order_id,carrier,number):
