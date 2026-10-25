@@ -74,6 +74,10 @@ def parse_detail(text,shop_id,order_id,weights):
         if not match: raise OrderProblem('Item layout requires review')
         end=next((i for i in range(pos+1,len(block)) if block[i].startswith('SKU ID: ')),len(block))
         item=block[pos+1:end]
+        # Some listings show the merchant's SKU immediately before price.
+        # The TikTok numeric SKU above remains the order's source identity.
+        if len(item) in (3,4) and re.fullmatch(r'Seller SKU: .+',item[-2]):
+            item=[*item[:-2],item[-1]]
         if len(item) not in (2,3): raise OrderProblem('Item title/options require review')
         price=re.fullmatch(r'£([\d,]+\.\d{2})\s*[x×]\s*(\d+)',item[-1])
         if not price: raise OrderProblem('Item price/quantity requires review')

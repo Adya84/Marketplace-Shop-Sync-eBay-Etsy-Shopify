@@ -51,6 +51,18 @@ def test_parse_visible_detail_preserves_address_and_items():
     assert order.items[0]['quantity']==1
     assert order.total=='6.99'
 
+def test_optional_seller_sku_preserves_title_variant_price_and_source_sku():
+    detail=DETAIL.replace('Square 100mm\n£6.99','Square 100mm\nSeller SKU: slate-square\n£6.99')
+    order=parse_detail(detail,'7496165985360775303','576970938340776741',{'1729826906594384007':200})
+    order.validate()
+    assert order.items==[dict(sku='1729826906594384007',title='Photo slate',variant='Square 100mm',
+                             unit_price='6.99',quantity=1,weight_grams=200)]
+
+def test_unknown_extra_item_metadata_still_requires_review():
+    detail=DETAIL.replace('Square 100mm\n£6.99','Square 100mm\nUnexpected option\n£6.99')
+    with pytest.raises(OrderProblem):
+        parse_detail(detail,'7496165985360775303','576970938340776741',{})
+
 def test_wrong_order_and_ambiguous_address_fail_closed():
     with pytest.raises(OrderProblem): parse_detail(DETAIL,'7496165985360775303','576970938340776742',{})
     order=parse_detail(DETAIL.replace('1 Example Road, Glasgow','1 Example Road'),'7496165985360775303','576970938340776741',{})
