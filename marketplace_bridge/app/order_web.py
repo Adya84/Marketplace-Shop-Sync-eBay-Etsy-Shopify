@@ -46,7 +46,9 @@ def mount_orders(app,core,client_factory):
     async def cycle(dry=False,manual=False):
         if run_lock.locked(): return
         async with run_lock:
+            stage='Shopify connection'
             try:
+                store.configure(last_message='Checking Shopify connection…')
                 config=store.settings()
                 credential=core.get_credentials('shopify')
                 domain=credential.get('shop_domain','')
@@ -55,14 +57,21 @@ def mount_orders(app,core,client_factory):
                 writes=(manual or config['enabled']) and not dry
                 shopify=OrderShopify(client_factory(credential))
                 await shopify.check_scopes(writes=writes)
+                stage='TikTok browser'
+                store.configure(last_message='Checking TikTok browser…')
                 await asyncio.to_thread(browser.start)
+                stage='TikTok shipping queue'
+                store.configure(last_message='Reading TikTok shipping queue…')
                 ids=await asyncio.to_thread(browser.scan_ids)
                 known=store.list_orders(10000)
                 linked=[r['source_id'] for r in known if r['shop']==config['shop_id'] and
                         (r['shopify_id'] or r['state'] in {'uncertain','claimed'})]
                 sync=OrderSync(store,shopify)
                 ready=0; failures=0
-                for order_id in dict.fromkeys([*ids,*linked]):
+                pending=list(dict.fromkeys([*ids,*linked]))
+                for position,order_id in enumerate(pending,1):
+                    stage='order verification'
+                    store.configure(last_message=f'Checking order {position} of {len(pending)}…')
                     try:
                         order=await asyncio.to_thread(browser.detail,order_id)
                     except Exception as exc:
@@ -91,8 +100,10 @@ def mount_orders(app,core,client_factory):
                                 (f' {failures} orders need source review.' if failures else ''))
             except OrderProblem as exc:
                 store.configure(last_message=str(exc))
-            except Exception:
-                store.configure(last_message='Scan stopped. Check Shopify connection and sign in to TikTok in the browser panel.')
+            except Exception as exc:
+                # Never expose raw driver/HTTP errors: they may contain buyer
+                # information, request headers or session capabilities.
+                store.configure(last_message=f'Scan stopped during {stage}: {type(exc).__name__}.')
 
     def schedule(coro):
         task=asyncio.create_task(coro); tasks.add(task); task.add_done_callback(tasks.discard)
