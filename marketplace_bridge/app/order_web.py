@@ -18,6 +18,20 @@ from .order_shopify import OrderShopify
 from .order_sync import OrderSync
 
 
+async def desktop_ready(port=5900):
+    writer=None
+    try:
+        reader,writer=await asyncio.wait_for(asyncio.open_connection('127.0.0.1',port),2)
+        banner=await asyncio.wait_for(reader.readexactly(12),2)
+        return banner.startswith(b'RFB ') and banner.endswith(b'\n')
+    except (OSError,asyncio.TimeoutError,asyncio.IncompleteReadError):
+        return False
+    finally:
+        if writer:
+            writer.close()
+            with contextlib.suppress(OSError): await writer.wait_closed()
+
+
 def ingress_peer(host):
     return host=='172.30.32.2' or (os.getenv('BRIDGE_DEVELOPMENT')=='1' and host in {'127.0.0.1','::1','testclient'})
 
@@ -192,6 +206,9 @@ def mount_orders(app,core,client_factory):
     async def start_browser():
         async def start():
             try:
+                store.configure(last_message='Starting TikTok browser and checking its display connection…')
+                if not await desktop_ready():
+                    store.configure(last_message='Desktop viewer is unavailable. Check the Shop Sync log for Xvfb or x11vnc errors.'); return
                 await asyncio.to_thread(browser.start)
                 store.configure(last_message='Browser started. Sign in in the browser panel, then scan.')
             except Exception:
@@ -228,11 +245,15 @@ def mount_orders(app,core,client_factory):
                         if isinstance(msg,bytes): await websocket.send_bytes(msg)
                         else: await websocket.send_text(msg)
                 bridges=[asyncio.create_task(incoming()),asyncio.create_task(outgoing())]
-                try: await asyncio.wait(bridges,return_when=asyncio.FIRST_COMPLETED)
+                try:
+                    done,_=await asyncio.wait(bridges,return_when=asyncio.FIRST_COMPLETED)
+                    for task in done: task.result()
                 finally:
                     for task in bridges: task.cancel()
                     await asyncio.gather(*bridges,return_exceptions=True)
-        except (WebSocketDisconnect,OSError): pass
+        except WebSocketDisconnect: pass
+        except Exception as exc:
+            store.configure(last_message='Desktop connection failed ('+type(exc).__name__+'). Check the Shop Sync log for display-service errors.')
         finally:
             with contextlib.suppress(Exception): await websocket.close()
     return store
