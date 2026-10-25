@@ -97,6 +97,37 @@ def test_import_button_requires_preview(workspace,monkeypatch):
         csrf=re.search(r'"csrf": "([^"]+)"',client.get('/orders').text)[1]
         assert client.post('/orders/import',headers={'x-order-csrf':csrf}).status_code==400
 
+def test_scan_failure_reports_stage_and_type_without_exception_content(tmp_path,monkeypatch):
+    import threading
+    import app.order_web as web
+    monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
+    finished=threading.Event()
+    class Browser:
+        def __init__(self,*args): pass
+        def start(self): pass
+        def close(self): pass
+        def scan_ids(self): raise TimeoutError('private customer or session data')
+    class Shopify:
+        def __init__(self,*args): pass
+        async def check_scopes(self,**kwargs): pass
+    original=web.OrderStore.configure
+    def configure(self,**values):
+        original(self,**values)
+        if values.get('last_message','').startswith('Scan stopped'): finished.set()
+    monkeypatch.setattr(web,'TikTokBrowser',Browser); monkeypatch.setattr(web,'OrderShopify',Shopify)
+    monkeypatch.setattr(web.OrderStore,'configure',configure)
+    core=SimpleNamespace(settings=SimpleNamespace(data_dir=tmp_path),secrets=SecretBox.from_file(tmp_path/'key'),
+                         get_credentials=lambda _:dict(shop_domain='test.myshopify.com'))
+    app=FastAPI(); store=mount_orders(app,core,lambda _:None)
+    store.configure(target_shop='test.myshopify.com')
+    with TestClient(app) as client:
+        csrf=re.search(r'"csrf": "([^"]+)"',client.get('/orders').text)[1]
+        assert client.post('/orders/scan',headers={'x-order-csrf':csrf}).status_code==200
+        assert finished.wait(3)
+        message=client.get('/orders/status').json()['message']
+        assert 'TikTok shipping queue' in message and 'TimeoutError' in message
+        assert 'private' not in message
+
 @pytest.mark.parametrize('valid_order',[True,False])
 def test_review_order_does_not_block_verified_orders(tmp_path,monkeypatch,valid_order):
     import threading
