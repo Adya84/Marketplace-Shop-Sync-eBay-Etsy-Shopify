@@ -83,9 +83,12 @@ def mount_orders(app,core,client_factory):
                     except OrderProblem: pass
                     # Tracking submission remains manual in this beta; show verified data only.
                     await sync.sync_tracking(order,browser,writes=False)
-                if dry: store.configure(preview_verified=ready>0 and failures==0)
+                # Detail failures remain durable review rows and never reach
+                # creation. They must not block independently validated orders.
+                if dry: store.configure(preview_verified=ready>0)
                 store.configure(last_message=f'Scan complete: {len(ids)} shipping-queue orders inspected. '+
-                                ('Preview only.' if not writes else 'Import run finished.'))
+                                ('Preview only.' if not writes else 'Import run finished.')+
+                                (f' {failures} orders need source review.' if failures else ''))
             except OrderProblem as exc:
                 store.configure(last_message=str(exc))
             except Exception:

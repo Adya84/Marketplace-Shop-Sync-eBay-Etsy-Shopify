@@ -96,3 +96,49 @@ def test_import_button_requires_preview(workspace,monkeypatch):
     with TestClient(app) as client:
         csrf=re.search(r'"csrf": "([^"]+)"',client.get('/orders').text)[1]
         assert client.post('/orders/import',headers={'x-order-csrf':csrf}).status_code==400
+
+@pytest.mark.parametrize('valid_order',[True,False])
+def test_review_order_does_not_block_verified_orders(tmp_path,monkeypatch,valid_order):
+    import threading
+    import app.order_web as web
+    from app.tests.test_orders import sample
+    from app.order_models import OrderProblem
+    monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
+    finished=threading.Event(); created=[]
+    broken='999999999999999999'
+    class Browser:
+        def __init__(self,*args): pass
+        def start(self): pass
+        def close(self): pass
+        def scan_ids(self): return [broken,*([sample().order_id] if valid_order else [])]
+        def detail(self,order_id):
+            if order_id==broken: raise OrderProblem('Source page layout requires review')
+            return sample()
+    class Shopify:
+        def __init__(self,*args): pass
+        async def check_scopes(self,**kwargs): pass
+        async def find(self,_): return None
+        async def create(self,order): created.append(order.order_id); return {'id':'gid://shopify/Order/1'}
+        async def tracking(self,_): return {'shipments':[]}
+    original=web.OrderStore.configure
+    def configure(self,**values):
+        original(self,**values)
+        if values.get('last_message','').startswith('Scan complete:'): finished.set()
+    monkeypatch.setattr(web,'TikTokBrowser',Browser); monkeypatch.setattr(web,'OrderShopify',Shopify)
+    monkeypatch.setattr(web.OrderStore,'configure',configure)
+    core=SimpleNamespace(settings=SimpleNamespace(data_dir=tmp_path),secrets=SecretBox.from_file(tmp_path/'key'),
+                         get_credentials=lambda _:dict(shop_domain='test.myshopify.com'))
+    app=FastAPI(); store=mount_orders(app,core,lambda _:None)
+    store.configure(shop_id=sample().shop_id,shop_name='Test',target_shop='test.myshopify.com')
+    with TestClient(app) as client:
+        csrf=re.search(r'"csrf": "([^"]+)"',client.get('/orders').text)[1]
+        headers={'x-order-csrf':csrf}
+        assert client.post('/orders/scan',headers=headers).status_code==200
+        assert finished.wait(3)
+        assert store.settings()['preview_verified'] is valid_order
+        assert store.get(sample().shop_id,broken)['state']=='review'
+        finished.clear()
+        result=client.post('/orders/import',headers=headers)
+        assert result.status_code==(200 if valid_order else 400)
+        if valid_order: assert finished.wait(3)
+        assert created==([sample().order_id] if valid_order else [])
