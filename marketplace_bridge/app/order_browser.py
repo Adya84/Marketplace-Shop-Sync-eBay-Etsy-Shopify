@@ -167,13 +167,9 @@ class TikTokBrowser:
     def scan_ids(self):
         from selenium.webdriver.common.by import By
         with self.lock:
-            self.driver.get(ORIGIN+'/homepage')
-            self.wait(lambda:bool(self.find_text('Orders to ship')))
-            self.guard()
-            # Select the leaf node, not every wrapper containing identical text.
-            leaves=[e for e in self.find_text('Orders to ship') if not e.find_elements(By.XPATH,'./*')]
-            if len(leaves)!=1: raise OrderProblem('Shipping queue control requires review')
-            leaves[0].click()
+            # Use the observed Seller Centre queue URL. Home-page card labels
+            # can arrive as untranslated locale keys even after successful login.
+            self.driver.get(ORIGIN+'/order?order_status[]=1&selected_sort=1&shop_region=GB&tab=to_ship')
             self.wait(lambda:bool(self.driver.find_elements(By.CSS_SELECTOR,'[role=tab]')))
             self.guard()
             # Home link can retain saved filters. Refuse filtered results until reset.
