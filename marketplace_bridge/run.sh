@@ -12,9 +12,16 @@ if command -v chromium-browser >/dev/null 2>&1; then
     mkdir -p /config/tiktok-browser
     chown shopsync-browser:shopsync-browser /config/tiktok-browser
     chmod 700 /config/tiktok-browser
-    Xvfb :99 -screen 0 1280x900x24 -nolisten tcp -ac >/dev/null 2>&1 &
-    x11vnc -display :99 -localhost -forever -shared -nopw -rfbport 5900 -quiet >/dev/null 2>&1 &
-    websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 >/dev/null 2>&1 &
+    Xvfb :99 -screen 0 1280x900x24 -nolisten tcp -ac &
+    # Xvfb binds its display asynchronously. Recover if the viewer starts first.
+    (
+        while true; do
+            x11vnc -display :99 -localhost -forever -shared -nopw -rfbport 5900 -quiet || true
+            echo 'Shop Sync: desktop viewer exited; retrying in two seconds' >&2
+            sleep 2
+        done
+    ) &
+    websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900 &
 fi
 # Preserve the real socket peer for the Ingress-only browser/order routes.
 exec python3 -m uvicorn app.main_v8:app --host 0.0.0.0 --port 8099 --no-proxy-headers --no-access-log

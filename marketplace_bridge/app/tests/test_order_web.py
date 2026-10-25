@@ -6,6 +6,17 @@ from fastapi.testclient import TestClient
 from app.order_web import mount_orders
 from app.security import SecretBox
 
+@pytest.mark.asyncio
+async def test_desktop_check_requires_a_real_rfb_banner():
+    import asyncio
+    from app.order_web import desktop_ready
+    async def rfb(reader,writer):
+        writer.write(b'RFB 003.008\n'); await writer.drain()
+        writer.close(); await writer.wait_closed()
+    async with await asyncio.start_server(rfb,'127.0.0.1',0) as server:
+        assert await desktop_ready(server.sockets[0].getsockname()[1])
+    assert not await desktop_ready(server.sockets[0].getsockname()[1] if server.sockets else 1)
+
 @pytest.fixture
 def workspace(tmp_path,monkeypatch):
     monkeypatch.delenv('BRIDGE_DEVELOPMENT',raising=False)
