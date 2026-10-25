@@ -46,3 +46,10 @@ After the latest scan finishes (including a manual scan), the scheduler waits fo
 The Import Now control shows acceptance or a persistent request error and is disabled while a scan or between-check refresh holds the lock. Live progress appears above the controls.
 
 Live beta7 testing on 25 October verified a scheduled import creating #1051–#1054 with customer profiles and weights. Subsequent page-load failures still occurred; a successful individual run does not establish long-term reliability. Beta8 recovery needs host verification after deployment.
+
+
+## Awaiting packing only (beta9)
+
+Manual and automatic scans clear saved filters, select TikTok's visible Awaiting packing radio option and verify its filtered count. Every displayed order row must still say Awaiting packing, and detail status is checked again before import. Other statuses are skipped if an order moves while the scan is running.
+
+Previously linked, completed or dispatched orders are not appended to the scan. The results view shows only IDs from the latest Awaiting packing queue; older ledger entries remain stored for duplicate protection. A verified empty packing queue completes normally.

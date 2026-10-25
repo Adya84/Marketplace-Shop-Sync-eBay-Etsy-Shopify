@@ -2,6 +2,42 @@ import pytest
 from app.order_browser import parse_detail, parse_tracking
 from app.order_models import OrderProblem
 
+@pytest.mark.parametrize('count',[0,1])
+def test_queue_selects_packing_only_and_uses_filtered_count(count):
+    from app.order_browser import TikTokBrowser, ORIGIN
+    selected=[False]
+    class Element:
+        def __init__(self,text='',action=None): self.text=text; self.action=action
+        def is_displayed(self): return True
+        def click(self):
+            if self.action: self.action()
+        def get_attribute(self,key): return 'true' if key=='aria-disabled' else ''
+    class Input(Element):
+        def is_selected(self): return selected[0]
+    class Label(Element):
+        def find_elements(self,*_): return [Input()]
+    class Link(Element):
+        def __init__(self,i): self.i=i
+        def get_attribute(self,_): return ORIGIN+'/order/detail?order_no='+self.i
+        def find_element(self,*_): return Element('Awaiting packing' if selected[0] else 'Awaiting collection')
+    packing=Label(f'Awaiting packing\n({count})',lambda:selected.__setitem__(0,True))
+    class Driver:
+        def get(self,_): pass
+        def find_elements(self,by,selector):
+            if selector=='[role=tab]': return [Element('To ship 24')]
+            if selector=='button': return [Element('Filter')]
+            if selector=='label': return [packing,Label('Awaiting collection (23)')]
+            if selector.startswith('a[href'):
+                return [Link('11111111111')]*count if selected[0] else [Link(str(11111111111+i)) for i in range(24)]
+            if selector=='[aria-label="Next"]': return [Element()]
+            if selector.startswith('//button'):
+                return [Element('Clear all',lambda:selected.__setitem__(0,False))] if 'Clear all' in selector else [Element('Apply')]
+            return []
+    browser=TikTokBrowser('unused',lambda:{}); browser.driver=Driver()
+    browser.guard=lambda:None; browser.main_text=lambda:'Awaiting packing' if count else 'No orders'
+    browser.wait=lambda fn:fn()
+    assert browser.scan_ids()==['11111111111']*count
+
 @pytest.mark.parametrize('code',['ERR_CONNECTION_RESET','ERR_HTTP2_PROTOCOL_ERROR'])
 def test_transient_navigation_retries_without_replacing_signed_in_driver(monkeypatch,code):
     from selenium.common.exceptions import WebDriverException
