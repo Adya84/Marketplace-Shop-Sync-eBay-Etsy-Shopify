@@ -65,13 +65,14 @@ def mount_orders(app,core,client_factory):
                 for order_id in dict.fromkeys([*ids,*linked]):
                     try:
                         order=await asyncio.to_thread(browser.detail,order_id)
-                    except Exception:
+                    except Exception as exc:
                         # Retain a durable review record without logging customer content.
                         old=store.get(config['shop_id'],order_id)
                         payload=old['payload'] if old else dict(shop_id=config['shop_id'],order_id=order_id,
                             status='Unknown',currency='GBP',total='0.00',shipping='0.00',address={},items=[],seller_fulfilled=False)
                         failures+=1
-                        store.source_failure(SourceOrder(**payload))
+                        reason=str(exc) if isinstance(exc,OrderProblem) else type(exc).__name__
+                        store.source_failure(SourceOrder(**payload),reason)
                         continue
                     # Never backfill already-dispatched historical orders.
                     if order_id not in linked and order.status not in {'Awaiting packing','Awaiting shipment'}: continue

@@ -68,12 +68,12 @@ class OrderStore:
         with self.connect() as conn:
             return self._decode(conn.execute('SELECT * FROM order_bridge WHERE shop=? AND source_id=?',(shop,source_id)).fetchone())
 
-    def source_failure(self,order):
+    def source_failure(self,order,reason=''):
         previous=self.get(order.shop_id,order.order_id)
         if previous and previous['state']=='validation_review':
             self.record(order,'validation_review',previous['message'],previous['shopify_id']); return
         state=previous['state'] if previous and previous['state'] in {'claimed','uncertain','tracking_uncertain'} else 'review'
-        self.record(order,state,'TikTok detail could not be verified; inspect in browser')
+        self.record(order,state,'TikTok detail could not be verified; inspect in browser'+(': '+reason if reason else ''))
 
     def list_orders(self,limit=200):
         with self.connect() as conn:

@@ -43,9 +43,12 @@ def parse_detail(text,shop_id,order_id,weights):
         boundary=address_lines.index('Delivery instructions')
         instructions=' '.join(address_lines[boundary+1:])
         address_lines=address_lines[:boundary]
-    # The address block must end with the postcode; unrelated text is rejected.
-    if len(address_lines)<4 or not re.fullmatch(r'[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}|GIR\s?0AA',address_lines[-1],re.I):
-        raise OrderProblem('Delivery postcode was not found at the end of the address')
+    # Toast notifications may follow the address in the rendered page text.
+    postcodes=[i for i,v in enumerate(address_lines) if re.fullmatch(
+        r'[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}|GIR\s?0AA',v,re.I)]
+    if len(postcodes)!=1 or postcodes[0]<3:
+        raise OrderProblem('Delivery address needs one unambiguous postcode')
+    address_lines=address_lines[:postcodes[0]+1]
     name=address_lines[0].split(maxsplit=1)
     body=[v for v in address_lines[1:-2] if not v.startswith('(+') and '@' not in v]
     if not body or not address_lines[-2].endswith(',United Kingdom'):
@@ -101,6 +104,7 @@ class TikTokBrowser:
             options.add_argument('--window-size=1280,900')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--no-first-run')
+            options.add_argument('--restore-last-session')
             self.driver=webdriver.Chrome(service=Service('/usr/bin/chromedriver'),options=options)
             self.driver.set_page_load_timeout(60)
             self.driver.get(ORIGIN+'/homepage')
@@ -151,7 +155,7 @@ class TikTokBrowser:
             if not re.fullmatch(r'\d{10,30}',order_id): raise OrderProblem('Invalid source order ID')
             self.driver.get(ORIGIN+'/order/detail?order_no='+order_id+'&shop_region=GB')
             self.wait(lambda:order_id in self.main_text() and bool(re.search(
-                r'(?:GIR\s?0AA|[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})(?:\nDelivery instructions\n[\s\S]+)?$',self.main_text(),re.I)))
+                r'(?:^|\n)(?:GIR\s?0AA|[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})(?:\n|$)',self.main_text(),re.I)))
             config=self.settings()
             order=parse_detail(self.main_text(),config['shop_id'],order_id,config['weights'])
             logistics=self.find_text('Logistics information','button')

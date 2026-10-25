@@ -60,6 +60,16 @@ def test_masked_address_cannot_import():
     order=parse_detail(DETAIL.replace('Test Buyer','T*** B***'),'7496165985360775303','576970938340776741',{'1729826906594384007':200})
     with pytest.raises(OrderProblem): order.validate()
 
+def test_notifications_after_postcode_do_not_hide_a_complete_address():
+    order=parse_detail(DETAIL+'\nYou have several products with low stock.',
+        '7496165985360775303','576970938340776741',{'1729826906594384007':200})
+    order.validate()
+    assert order.address['zip']=='G52 3RZ'
+
+def test_multiple_postcodes_in_address_region_require_review():
+    with pytest.raises(OrderProblem):
+        parse_detail(DETAIL+'\nSW1A 1AA','7496165985360775303','576970938340776741',{})
+
 def test_flat_and_street_are_never_split_into_a_guessed_town():
     order=parse_detail(DETAIL.replace('1 Example Road, Glasgow','Flat 2, 10 High Street'),
                        '7496165985360775303','576970938340776741',{'1729826906594384007':200})
