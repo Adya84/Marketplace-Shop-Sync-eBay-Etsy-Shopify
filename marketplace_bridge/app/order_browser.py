@@ -5,6 +5,7 @@ review row instead of guessing recipient, price, carrier, or order identity.
 """
 import re
 import threading
+import time
 from urllib.parse import urlparse, parse_qs
 from .order_models import SourceOrder, OrderProblem
 
@@ -93,9 +94,44 @@ def parse_detail(text,shop_id,order_id,weights):
                        email=emails[0] if emails else '')
 
 class TikTokBrowser:
-    def __init__(self,profile,settings):
+    def __init__(self,profile,settings,report=None):
         self.profile=str(profile); self.settings=settings; self.driver=None
+        self.report=report or (lambda _:None)
         self.lock=threading.RLock()
+
+    def navigate(self,url,refresh=False):
+        """Retry only read-only page loads; never restart or replace the session."""
+        from selenium.common.exceptions import WebDriverException, TimeoutException
+        if urlparse(url).hostname!='seller-uk.tiktok.com':
+            raise OrderProblem('Unsupported TikTok page destination')
+        for attempt in range(3):
+            try:
+                if refresh: self.driver.refresh()
+                else: self.driver.get(url)
+                return
+            except WebDriverException as exc:
+                code=re.search(r'net::(ERR_[A-Z0-9_]+)',str(exc))
+                retryable=code and code[1] in {
+                    'ERR_CONNECTION_RESET','ERR_CONNECTION_CLOSED','ERR_CONNECTION_TIMED_OUT',
+                    'ERR_TIMED_OUT','ERR_NETWORK_CHANGED','ERR_NAME_NOT_RESOLVED',
+                    'ERR_INTERNET_DISCONNECTED','ERR_HTTP2_PROTOCOL_ERROR',
+                    'ERR_QUIC_PROTOCOL_ERROR','ERR_EMPTY_RESPONSE','ERR_ABORTED','ERR_FAILED',
+                    'ERR_HTTP_RESPONSE_CODE_FAILURE'}
+                if not retryable and not isinstance(exc,TimeoutException): raise
+                reason=code[1] if retryable else 'page-load timeout'
+                if attempt==2:
+                    raise OrderProblem(f'TikTok page load failed after 3 attempts ({reason}); next check will retry.') from None
+                self.report(f'TikTok page load failed ({reason}); retrying {attempt+2} of 3…')
+                time.sleep((2,5)[attempt])
+
+    def refresh_idle(self):
+        with self.lock:
+            if not self.driver: return False
+            url=self.driver.current_url
+            if urlparse(url).hostname!='seller-uk.tiktok.com':
+                raise OrderProblem('Sign in to TikTok in the browser panel')
+            self.navigate(url,refresh=True)
+            return True
 
     def start(self):
         with self.lock:
@@ -111,7 +147,7 @@ class TikTokBrowser:
             options.add_argument('--restore-last-session')
             self.driver=webdriver.Chrome(service=Service('/usr/bin/chromedriver'),options=options)
             self.driver.set_page_load_timeout(60)
-            self.driver.get(ORIGIN+'/homepage')
+            self.navigate(ORIGIN+'/homepage')
 
     def close(self):
         with self.lock:
@@ -157,7 +193,7 @@ class TikTokBrowser:
     def detail(self,order_id):
         with self.lock:
             if not re.fullmatch(r'\d{10,30}',order_id): raise OrderProblem('Invalid source order ID')
-            self.driver.get(ORIGIN+'/order/detail?order_no='+order_id+'&shop_region=GB')
+            self.navigate(ORIGIN+'/order/detail?order_no='+order_id+'&shop_region=GB')
             self.wait(lambda:order_id in self.main_text() and bool(re.search(
                 r'(?:^|\n)(?:GIR\s?0AA|[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2})(?:\n|$)',self.main_text(),re.I)))
             config=self.settings()
@@ -177,7 +213,7 @@ class TikTokBrowser:
         with self.lock:
             # Use the observed Seller Centre queue URL. Home-page card labels
             # can arrive as untranslated locale keys even after successful login.
-            self.driver.get(ORIGIN+'/order?order_status[]=1&selected_sort=1&shop_region=GB&tab=to_ship')
+            self.navigate(ORIGIN+'/order?order_status[]=1&selected_sort=1&shop_region=GB&tab=to_ship')
             self.wait(lambda:bool(self.driver.find_elements(By.CSS_SELECTOR,'[role=tab]')))
             self.guard()
             # Home link can retain saved filters. Refuse filtered results until reset.

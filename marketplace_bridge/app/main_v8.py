@@ -5,7 +5,7 @@ from .main_v5 import _shopify_client, _drop_route
 from .order_web import mount_orders
 
 app=v7.app
-app.version='0.0.34-beta7'
+app.version='0.0.34-beta8'
 order_store=mount_orders(app,core,_shopify_client)
 _drop_route('/','GET')
 

@@ -2,6 +2,61 @@ import pytest
 from app.order_browser import parse_detail, parse_tracking
 from app.order_models import OrderProblem
 
+@pytest.mark.parametrize('code',['ERR_CONNECTION_RESET','ERR_HTTP2_PROTOCOL_ERROR'])
+def test_transient_navigation_retries_without_replacing_signed_in_driver(monkeypatch,code):
+    from selenium.common.exceptions import WebDriverException
+    from app.order_browser import TikTokBrowser, ORIGIN
+    import app.order_browser as module
+    calls=[]; reports=[]
+    class Driver:
+        def get(self,url):
+            calls.append(url)
+            if len(calls)==1: raise WebDriverException('unknown error: net::'+code+' private-data')
+    browser=TikTokBrowser('unused',lambda:{},reports.append); browser.driver=Driver()
+    original=browser.driver
+    monkeypatch.setattr(module.time,'sleep',lambda _:None)
+    browser.navigate(ORIGIN+'/homepage')
+    assert calls==[ORIGIN+'/homepage']*2 and browser.driver is original
+    assert reports and 'private-data' not in reports[0]
+
+def test_navigation_retry_is_bounded_and_redacts_error(monkeypatch):
+    from selenium.common.exceptions import WebDriverException
+    from app.order_browser import TikTokBrowser, ORIGIN
+    import app.order_browser as module
+    calls=[]
+    class Driver:
+        def get(self,url):
+            calls.append(url); raise WebDriverException('net::ERR_NAME_NOT_RESOLVED secret-session')
+    browser=TikTokBrowser('unused',lambda:{}); browser.driver=Driver()
+    monkeypatch.setattr(module.time,'sleep',lambda _:None)
+    with pytest.raises(OrderProblem) as exc: browser.navigate(ORIGIN+'/homepage')
+    assert len(calls)==3 and 'ERR_NAME_NOT_RESOLVED' in str(exc.value)
+    assert 'secret-session' not in str(exc.value)
+
+def test_non_network_driver_failure_is_not_blindly_retried():
+    from selenium.common.exceptions import WebDriverException
+    from app.order_browser import TikTokBrowser, ORIGIN
+    calls=[]
+    class Driver:
+        def get(self,url): calls.append(url); raise WebDriverException('invalid session id')
+    browser=TikTokBrowser('unused',lambda:{}); browser.driver=Driver()
+    with pytest.raises(WebDriverException): browser.navigate(ORIGIN+'/homepage')
+    assert len(calls)==1
+
+def test_idle_refresh_uses_existing_browser_and_does_not_start_signed_out_browser():
+    from app.order_browser import TikTokBrowser, ORIGIN
+    browser=TikTokBrowser('unused',lambda:{})
+    assert browser.refresh_idle() is False
+    calls=[]
+    class Driver:
+        current_url=ORIGIN+'/order/detail?order_no=12345678901'
+        def refresh(self): calls.append('refresh')
+    browser.driver=Driver()
+    assert browser.refresh_idle() is True and calls==['refresh']
+    browser.driver.current_url='https://seller-uk-accounts.tiktok.com/account/login'
+    with pytest.raises(OrderProblem): browser.refresh_idle()
+    assert calls==['refresh']
+
 DETAIL = '''Back
 576970938340776741
 Cancel

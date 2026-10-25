@@ -7,6 +7,25 @@ from app.order_web import mount_orders
 from app.security import SecretBox
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('manual_finish',[None,30])
+async def test_scheduler_refreshes_four_minutes_after_latest_check_leaving_one_minute(manual_finish):
+    import asyncio
+    from app.order_web import poll_orders
+    events=[]; now=[0]; finished=[None]
+    async def cycle():
+        events.append(('check',now[0])); finished[0]=now[0]
+        if len(events)>=3: raise asyncio.CancelledError
+    async def refresh(): events.append(('refresh',now[0]))
+    async def sleep(seconds):
+        now[0]+=seconds
+        if manual_finish is not None and now[0]>=manual_finish and finished[0]==0:
+            finished[0]=manual_finish
+    with pytest.raises(asyncio.CancelledError):
+        await poll_orders(lambda:True,cycle,refresh,lambda:finished[0],sleep,lambda:now[0])
+    shift=manual_finish or 0
+    assert events==[('check',0),('refresh',240+shift),('check',300+shift)]
+
+@pytest.mark.asyncio
 async def test_desktop_check_requires_a_real_rfb_banner():
     import asyncio
     from app.order_web import desktop_ready

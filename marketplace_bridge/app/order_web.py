@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import time
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 import httpx
@@ -35,15 +36,34 @@ async def desktop_ready(port=5900):
 def ingress_peer(host):
     return host=='172.30.32.2' or (os.getenv('BRIDGE_DEVELOPMENT')=='1' and host in {'127.0.0.1','::1','testclient'})
 
+
+async def poll_orders(enabled,cycle,refresh,completed_at,sleep=asyncio.sleep,clock=time.monotonic):
+    refreshed_for=None
+    while True:
+        if not enabled():
+            await sleep(10); continue
+        finished=completed_at()
+        if finished is None or clock()-finished>=300:
+            await cycle()
+            await sleep(1); continue
+        if clock()-finished>=240 and refreshed_for!=finished:
+            if await refresh() is not False: refreshed_for=finished
+            await sleep(1); continue
+        deadline=finished+(300 if refreshed_for==finished else 240)
+        await sleep(min(10,max(1,deadline-clock())))
+
 def mount_orders(app,core,client_factory):
     store=OrderStore(core.settings.data_dir/'orders.db',core.secrets)
-    browser=TikTokBrowser(core.settings.data_dir/'tiktok-browser',store.settings)
+    browser=TikTokBrowser(core.settings.data_dir/'tiktok-browser',store.settings,
+                         lambda message:store.configure(last_message=message))
     csrf=secrets.token_urlsafe(32)
     run_lock=asyncio.Lock()
+    last_completed=None
     tasks=set()
     previous=app.router.lifespan_context
 
     async def cycle(dry=False,manual=False):
+        nonlocal last_completed
         if run_lock.locked(): return
         async with run_lock:
             stage='Shopify connection'
@@ -104,18 +124,28 @@ def mount_orders(app,core,client_factory):
                 # Never expose raw driver/HTTP errors: they may contain buyer
                 # information, request headers or session capabilities.
                 store.configure(last_message=f'Scan stopped during {stage}: {type(exc).__name__}.')
+            finally: last_completed=time.monotonic()
 
     def schedule(coro):
         task=asyncio.create_task(coro); tasks.add(task); task.add_done_callback(tasks.discard)
 
+    async def refresh_between_checks():
+        if run_lock.locked(): return False
+        async with run_lock:
+            try:
+                store.configure(last_message='Refreshing TikTok browser between checks…')
+                refreshed=await asyncio.to_thread(browser.refresh_idle)
+                store.configure(last_message='TikTok browser refreshed; next automatic check in about one minute.'
+                                if refreshed else 'TikTok browser is not started; next check will start it.')
+            except OrderProblem as exc: store.configure(last_message=str(exc))
+            except Exception as exc:
+                store.configure(last_message=f'Between-check browser refresh failed: {type(exc).__name__}; next check will retry.')
+
     @asynccontextmanager
     async def lifespan(application):
-        async def poll():
-            while True:
-                if store.settings()['enabled']: await cycle()
-                await asyncio.sleep(300)
         async with previous(application):
-            poll_task=asyncio.create_task(poll())
+            poll_task=asyncio.create_task(poll_orders(lambda:store.settings()['enabled'],cycle,refresh_between_checks,
+                                                    lambda:last_completed))
             try: yield
             finally:
                 poll_task.cancel()
@@ -168,12 +198,12 @@ def mount_orders(app,core,client_factory):
         <label>Actual item weights in grams: JSON mapping of TikTok SKU ID to weight<textarea id="weights">'''+esc(json.dumps(config['weights'],indent=2))+'''</textarea></label>
         <label>Carrier names: JSON mapping from Shopify carrier to TikTok carrier<textarea id="carriers">'''+esc(json.dumps(config['carriers'],indent=2))+'''</textarea></label>
         <label><input id="enabled" type="checkbox" '''+('checked' if config['enabled'] else '')+'''>Import new orders every five minutes</label>
-        <button onclick="save()">Save settings</button><button onclick="act('scan')">Scan and preview</button><button onclick="act('import')">Import TikTok orders now</button><button onclick="act('browser/start')">Start TikTok browser</button><button onclick="location.reload()">Refresh orders</button>
+        <button onclick="save()">Save settings</button><button onclick="act('scan')">Scan and preview</button><button id="import-now" onclick="act('import')">Import TikTok orders now</button><button onclick="act('browser/start')">Start TikTok browser</button><button onclick="location.reload()">Refresh orders</button><p id="action-status" role="status"></p>
         <p>Start the browser, sign in below, save the verified account and actual weights, then preview before enabling imports. Session expiry pauses imports until you sign in again.</p></section>
         <section><h2>TikTok browser</h2><p>Sign in here on this Home Assistant host. Your browser session stays in the app’s private configuration.</p>
         <iframe title="TikTok sign in" src="'''+esc(base)+'''/orders/desktop/vnc.html?autoconnect=true&amp;resize=scale&amp;path='''+quote(base+'/orders/desktop/websockify?token='+csrf,safe='')+'''"></iframe></section>
         <section><h2>Import preview and review</h2><p>Unknown weights, masked addresses, discounts that do not reconcile, cancelled orders and multiple parcels need review. No labels are purchased automatically.</p><div class="scroll"><table><thead><tr><th>TikTok order</th><th>Status</th><th>Items</th><th>Delivery</th><th>GBP</th><th>Review</th><th>Tracking</th></tr></thead><tbody>'''+''.join(rows)+'''</tbody></table></div></section>
-        </main><script>const cfg='''+boot+''';let busy=false;async function status(){try{const r=await fetch(cfg.base+'/orders/status',{cache:'no-store'});if(!r.ok)return;const s=await r.json();document.getElementById('status').textContent=(s.running?'Working… ':'')+s.message+' '+(s.automatic?'Automatic import is on (5 minute interval).':'Automatic import is off.')}catch(e){}}async function send(path,body){const r=await fetch(cfg.base+'/orders/'+path,{method:'POST',headers:{'content-type':'application/json','x-order-csrf':cfg.csrf},body:JSON.stringify(body||{})});const text=await r.text();if(!r.ok){document.getElementById('status').textContent=text;return false}await status();return true}async function act(path){if(busy)return;busy=true;try{if(await send(path)){if(path==='scan'||path==='import')await status()}}finally{busy=false}}async function save(){try{await send('settings',{shop_name:document.getElementById('shop_name').value,shop_id:document.getElementById('shop_id').value,target_shop:document.getElementById('target_shop').value,weights:JSON.parse(document.getElementById('weights').value),carriers:JSON.parse(document.getElementById('carriers').value),enabled:document.getElementById('enabled').checked});await status()}catch(e){document.getElementById('status').textContent='Check the JSON settings.'}}status();setInterval(status,3000)</script></body></html>''')
+        </main><script>const cfg='''+boot+''';let busy=false;async function status(){try{const r=await fetch(cfg.base+'/orders/status',{cache:'no-store'});if(!r.ok)return;const s=await r.json();document.getElementById('import-now').disabled=s.running;document.getElementById('status').textContent=(s.running?'Working… ':'')+s.message+' '+(s.automatic?'Automatic import is on (5 minute interval).':'Automatic import is off.')}catch(e){}}async function send(path,body){const r=await fetch(cfg.base+'/orders/'+path,{method:'POST',headers:{'content-type':'application/json','x-order-csrf':cfg.csrf},body:JSON.stringify(body||{})});const text=await r.text();if(!r.ok){let detail=text;try{detail=JSON.parse(text).detail||text}catch(e){}document.getElementById('action-status').textContent=detail;return false}await status();return true}async function act(path){if(busy)return;busy=true;document.getElementById('action-status').textContent='Sending request…';try{if(await send(path)){document.getElementById('action-status').textContent=path==='import'?'Import request accepted. Follow live progress above.':path==='scan'?'Preview request accepted. Follow live progress above.':'Browser start requested.';await status()}}catch(e){document.getElementById('action-status').textContent='Could not reach Shop Sync. Reload this page and try again.'}finally{busy=false}}async function save(){try{await send('settings',{shop_name:document.getElementById('shop_name').value,shop_id:document.getElementById('shop_id').value,target_shop:document.getElementById('target_shop').value,weights:JSON.parse(document.getElementById('weights').value),carriers:JSON.parse(document.getElementById('carriers').value),enabled:document.getElementById('enabled').checked});await status()}catch(e){document.getElementById('status').textContent='Check the JSON settings.'}}status();setInterval(status,3000)</script></body></html>''')
 
     @app.post('/orders/settings')
     async def configure(request:Request):
@@ -203,6 +233,8 @@ def mount_orders(app,core,client_factory):
 
     @app.post('/orders/scan')
     async def scan():
+        if run_lock.locked(): raise HTTPException(409,'An order scan is already running; follow live progress above')
+        store.configure(last_message='Preview requested…')
         schedule(cycle(dry=True)); return {'started':True}
 
     @app.post('/orders/import')
@@ -210,6 +242,7 @@ def mount_orders(app,core,client_factory):
         if run_lock.locked(): raise HTTPException(409,'An order scan is already running')
         if not store.settings().get('preview_verified'):
             raise HTTPException(400,'Save settings, scan and check the preview before the first import')
+        store.configure(last_message='Manual import requested…')
         schedule(cycle(manual=True)); return {'started':True}
 
     @app.get('/orders/status')

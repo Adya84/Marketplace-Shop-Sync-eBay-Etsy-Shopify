@@ -16,7 +16,7 @@ The native TikTok sales channel is preferable when its product mappings work: it
 1. Back up the existing Shop Sync app. Build this development branch in a separate local app installation; do not replace the production app until host checks pass.
 2. Open the app through Home Assistant Ingress, then select **TikTok order imports · beta**.
 3. Connect Shopify using the app's own offline connection after the publisher has added all required scopes above. Approve the updated access in Shopify when requested.
-4. Start the TikTok browser and sign in inside that browser panel. Complete any login challenge yourself. The session is separate from your desktop browser and persists across restarts.
+4. Start the TikTok browser and sign in inside that browser panel. Complete any login challenge yourself. The session is separate from your desktop browser. TikTok may require sign-in again after an app/browser restart; persistence across restarts is not guaranteed.
 5. Enter the verified shop name/ID and connected Shopify domain. Enter the actual weight for each sold TikTok SKU. Save, then **Scan and preview**. Review the displayed orders and recipient details; **Import TikTok orders now** imports only orders that passed the preview checks. The automatic five-minute switch stays disabled until a successful preview and complete Shopify scopes.
 6. Check every recipient, street, supplied district, postcode, item option, quantity and price. The parser preserves the entire TikTok street block rather than guessing where a comma separates a post town. Shopify's city field uses the explicitly supplied district. If the label requires a distinct post town, review/edit the address before purchase.
 7. Verify one real import on the host, including **Create shipping label**, before unattended use. Restart the app and scan again to verify no second order appears. Check native imports are not racing the bridge.
@@ -35,3 +35,14 @@ The shipping queue is traversed across all pages and compared with its To ship c
 ## Tracking return
 
 Native carrier mapping already includes Royal Mail. The bridge's carrier map is review-only while automatic tracking submission remains unimplemented. Do not interpret a matching tracking number on both platforms as proof of automatic sync unless manual entry has been ruled out.
+
+
+## Page-load recovery and refresh timing (beta8)
+
+Network page-load errors and navigation timeouts are retried up to three times in the same Chromium session, with two- and five-second pauses. No browser restart, cookie export, or new login session is used for this recovery. Unknown controller failures and authentication problems still stop safely. Only read-only navigation is retried; Shopify order mutations are never blindly replayed.
+
+After the latest scan finishes (including a manual scan), the scheduler waits four minutes, refreshes the existing TikTok page, then starts the next import at about five minutes after that scan finished. A manual scan resets both deadlines. The refresh shares the scan lock and is skipped while an import/scan is active. Automatic imports must be enabled for these scheduled refreshes.
+
+The Import Now control shows acceptance or a persistent request error and is disabled while a scan or between-check refresh holds the lock. Live progress appears above the controls.
+
+Live beta7 testing on 25 October verified a scheduled import creating #1051–#1054 with customer profiles and weights. Subsequent page-load failures still occurred; a successful individual run does not establish long-term reliability. Beta8 recovery needs host verification after deployment.
