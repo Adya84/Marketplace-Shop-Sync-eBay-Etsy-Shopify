@@ -32,5 +32,3 @@ ports:
   8099/tcp: null
 ports_description:
   8099/tcp: Direct web interface (Ingress is recommended)
-
-

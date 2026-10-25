@@ -13,5 +13,3 @@ _drop_route('/','GET')
 def dashboard():
     page=v7.dashboard().body.decode('utf-8')
     return HTMLResponse(page.replace('</body>', '<a href="orders" style="position:fixed;right:24px;bottom:24px;padding:14px 22px;background:#263e80;color:white;border-radius:12px;z-index:1000">TikTok order imports · beta</a></body>'))
-
-
