@@ -271,9 +271,12 @@ class TikTokBrowser:
                 if not ids and not any(v in text for v in ('No orders','No data','No results')): return None
                 return ids
             result=[]; seen=set()
+            def ready_page():
+                current=page()
+                return (current,) if current is not None else False
             for _ in range(500):
                 # Wrap empty pages so WebDriverWait does not treat [] as loading.
-                ids=self.wait(lambda:(page(),) if page() is not None else False)[0]
+                ids=self.wait(ready_page)[0]
                 if not ids and expected_count==0: return []
                 signature=tuple(ids)
                 if signature in seen: raise OrderProblem('Order pagination repeated; scan incomplete')
@@ -285,7 +288,10 @@ class TikTokBrowser:
                     if len(result)!=expected_count: raise OrderProblem('Awaiting packing queue changed; rescan required')
                     return result
                 nxt.click()
-                self.wait(lambda:page() is not None and tuple(page())!=signature)
+                def changed_page():
+                    current=page()
+                    return current is not None and tuple(current)!=signature
+                self.wait(changed_page)
             raise OrderProblem('Order pagination limit reached; scan incomplete')
 
     def submit_tracking(self,order_id,carrier,number):

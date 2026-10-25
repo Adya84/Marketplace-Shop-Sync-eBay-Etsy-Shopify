@@ -3,9 +3,10 @@ from app.order_browser import parse_detail, parse_tracking
 from app.order_models import OrderProblem
 
 @pytest.mark.parametrize('count',[0,1])
-def test_queue_selects_packing_only_and_uses_filtered_count(count):
+@pytest.mark.parametrize('redraw',[False,True])
+def test_queue_selects_packing_only_and_uses_filtered_count(count,redraw):
     from app.order_browser import TikTokBrowser, ORIGIN
-    selected=[False]
+    selected=[False]; reads=[]
     class Element:
         def __init__(self,text='',action=None): self.text=text; self.action=action
         def is_displayed(self): return True
@@ -34,6 +35,9 @@ def test_queue_selects_packing_only_and_uses_filtered_count(count):
             if selector=='label':
                 return [Label(f'Awaiting packing\n({count})',lambda:selected.__setitem__(0,True)),Label('Awaiting collection (23)')]
             if selector.startswith('a[href'):
+                reads.append(1)
+                if redraw and len(reads)>1:
+                    selected[0]=False
                 return [Link('11111111111')]*count if selected[0] else [Link(str(11111111111+i)) for i in range(24)]
             if selector=='[aria-label="Next"]': return [Element()]
             if selector.startswith('//button'):
