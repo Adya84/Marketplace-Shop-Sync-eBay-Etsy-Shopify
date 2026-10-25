@@ -83,12 +83,10 @@ def mount_orders(app,core,client_factory):
                 stage='TikTok shipping queue'
                 store.configure(last_message='Reading TikTok shipping queue…')
                 ids=await asyncio.to_thread(browser.scan_ids)
-                known=store.list_orders(10000)
-                linked=[r['source_id'] for r in known if r['shop']==config['shop_id'] and
-                        (r['shopify_id'] or r['state'] in {'uncertain','claimed'})]
+                store.configure(active_packing_ids=ids)
                 sync=OrderSync(store,shopify)
                 ready=0; failures=0
-                pending=list(dict.fromkeys([*ids,*linked]))
+                pending=list(dict.fromkeys(ids))
                 for position,order_id in enumerate(pending,1):
                     stage='order verification'
                     store.configure(last_message=f'Checking order {position} of {len(pending)}…')
@@ -104,7 +102,7 @@ def mount_orders(app,core,client_factory):
                         store.source_failure(SourceOrder(**payload),reason)
                         continue
                     # Never backfill already-dispatched historical orders.
-                    if order_id not in linked and order.status not in {'Awaiting packing','Awaiting shipment'}: continue
+                    if order.status!='Awaiting packing': continue
                     await sync.import_order(order,writes=writes)
                     try:
                         order.validate()
@@ -115,7 +113,7 @@ def mount_orders(app,core,client_factory):
                 # Detail failures remain durable review rows and never reach
                 # creation. They must not block independently validated orders.
                 if dry: store.configure(preview_verified=ready>0)
-                store.configure(last_message=f'Scan complete: {len(ids)} shipping-queue orders inspected. '+
+                store.configure(last_message=f'Scan complete: {len(ids)} Awaiting packing orders inspected. '+
                                 ('Preview only.' if not writes else 'Import run finished.')+
                                 (f' {failures} orders need source review.' if failures else ''))
             except OrderProblem as exc:
@@ -175,6 +173,8 @@ def mount_orders(app,core,client_factory):
         if base and not re.fullmatch(r'/[A-Za-z0-9_/-]+',base): raise HTTPException(400,'Invalid ingress path')
         rows=[]
         for row in store.list_orders():
+            active=config.get('active_packing_ids')
+            if active is not None and (row['shop']!=config['shop_id'] or row['source_id'] not in active): continue
             payload=row['payload']; items=payload.get('items',[])
             summary='; '.join(f"{i['quantity']} × {i['title']} — {i.get('variant','')} (SKU {i.get('sku','')})" for i in items)
             address=payload.get('address',{})

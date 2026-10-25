@@ -72,18 +72,19 @@ def test_browser_socket_rejects_missing_token(workspace,monkeypatch):
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect('/orders/desktop/websockify'): pass
 
-def test_manual_import_works_with_timer_off_and_does_not_repeat(tmp_path,monkeypatch):
+@pytest.mark.parametrize('status,expected',[('Awaiting packing',1),('Awaiting shipment',0),('Awaiting collection',0)])
+def test_manual_import_only_packing_with_timer_off_and_does_not_repeat(tmp_path,monkeypatch,status,expected):
     import threading
     import app.order_web as web
     from app.tests.test_orders import sample
     monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
-    finished=threading.Event(); created=[]
+    finished=threading.Event(); created=[]; inspected=[]
     class Browser:
         def __init__(self,*args): pass
         def start(self): pass
         def close(self): pass
         def scan_ids(self): return [sample().order_id]
-        def detail(self,_): return sample()
+        def detail(self,order_id): inspected.append(order_id); return replace(sample(),status=status)
     class Shopify:
         def __init__(self,*args): pass
         async def check_scopes(self,**kwargs): pass
@@ -100,15 +101,27 @@ def test_manual_import_works_with_timer_off_and_does_not_repeat(tmp_path,monkeyp
                          get_credentials=lambda _:dict(shop_domain='test.myshopify.com'))
     app=FastAPI();store=mount_orders(app,core,lambda _:None)
     store.configure(shop_id=sample().shop_id,shop_name='Test',target_shop='test.myshopify.com',preview_verified=True)
+    from dataclasses import replace
+    historical=replace(sample(),order_id='999999999999999999',status='Awaiting collection')
+    store.record(historical,'linked','Already dispatched','gid://shopify/Order/999')
     with TestClient(app) as client:
         csrf=re.search(r'"csrf": "([^"]+)"',client.get('/orders').text)[1]
         assert client.post('/orders/import',headers={'x-order-csrf':csrf}).status_code==200
         assert finished.wait(3)
-        assert len(created)==1 and not store.settings()['enabled']
+        assert len(created)==expected and not store.settings()['enabled']
         finished.clear()
         assert client.post('/orders/import',headers={'x-order-csrf':csrf}).status_code==200
         assert finished.wait(3)
-        assert len(created)==1
+        assert len(created)==expected
+        assert inspected==[sample().order_id,sample().order_id]
+
+def test_packing_result_view_excludes_previous_completed_orders(workspace,monkeypatch):
+    from app.tests.test_orders import sample
+    monkeypatch.setenv('BRIDGE_DEVELOPMENT','1'); app,store=workspace
+    store.record(sample(),'linked','Old completed order','gid://shopify/Order/999')
+    store.configure(active_packing_ids=[],shop_id=sample().shop_id)
+    with TestClient(app) as client:
+        assert sample().order_id not in client.get('/orders').text
 
 def test_import_button_requires_preview(workspace,monkeypatch):
     monkeypatch.setenv('BRIDGE_DEVELOPMENT','1');app,_=workspace

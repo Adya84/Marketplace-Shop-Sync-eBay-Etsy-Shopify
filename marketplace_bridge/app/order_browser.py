@@ -224,16 +224,27 @@ class TikTokBrowser:
             if len(filters)!=1: raise OrderProblem('Order filters could not be verified')
             filters[0].click()
             self.wait(lambda:bool(self.find_text('Clear all','button')))
-            self.click_text('Clear all'); self.click_text('Apply')
+            self.click_text('Clear all')
+            packing=[]
+            for label in self.driver.find_elements(By.CSS_SELECTOR,'label'):
+                match=re.fullmatch(r'Awaiting packing\s*\(\s*(\d+)\s*\)',label.text.strip())
+                if label.is_displayed() and match and label.find_elements(By.CSS_SELECTOR,'input[type=radio]'):
+                    packing.append((label,int(match[1])))
+            if len(packing)!=1: raise OrderProblem('Awaiting packing filter could not be verified')
+            label,expected_count=packing[0]
+            label.click()
+            if not label.find_elements(By.CSS_SELECTOR,'input[type=radio]')[0].is_selected():
+                raise OrderProblem('Awaiting packing filter was not selected')
+            self.click_text('Apply')
             self.wait(lambda:not any(e.is_displayed() for e in self.driver.find_elements(By.CSS_SELECTOR,'[role=dialog]')))
-            expected_match=re.search(r'\d+',tabs[0].text)
-            if not expected_match: raise OrderProblem('Shipping queue count could not be verified')
-            expected_count=int(expected_match[0])
             def page():
                 self.guard()
                 text=self.main_text()
                 ids=[]
                 for e in self.driver.find_elements(By.CSS_SELECTOR,'a[href*="/order/detail?order_no="]'):
+                    if not e.is_displayed(): continue
+                    row=e.find_element(By.XPATH,'ancestor::tr[1]')
+                    if 'Awaiting packing' not in lines(row.text): return None
                     value=parse_qs(urlparse(e.get_attribute('href')).query).get('order_no',[''])[0]
                     if re.fullmatch(r'\d{10,30}',value) and value not in ids: ids.append(value)
                 if not ids and not any(v in text for v in ('No orders','No data','No results')): return None
@@ -242,6 +253,7 @@ class TikTokBrowser:
             for _ in range(500):
                 # Wrap empty pages so WebDriverWait does not treat [] as loading.
                 ids=self.wait(lambda:(page(),) if page() is not None else False)[0]
+                if not ids and expected_count==0: return []
                 signature=tuple(ids)
                 if signature in seen: raise OrderProblem('Order pagination repeated; scan incomplete')
                 seen.add(signature); result.extend(i for i in ids if i not in result)
@@ -249,7 +261,7 @@ class TikTokBrowser:
                 if not nexts or len(nexts)!=1: raise OrderProblem('Order pagination could not be verified')
                 nxt=nexts[0]
                 if nxt.get_attribute('aria-disabled')=='true' or 'disabled' in (nxt.get_attribute('class') or ''):
-                    if len(result)!=expected_count: raise OrderProblem('Shipping queue changed or is filtered; rescan required')
+                    if len(result)!=expected_count: raise OrderProblem('Awaiting packing queue changed; rescan required')
                     return result
                 nxt.click()
                 self.wait(lambda:page() is not None and tuple(page())!=signature)
