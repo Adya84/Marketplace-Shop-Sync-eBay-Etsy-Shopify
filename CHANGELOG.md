@@ -1,5 +1,11 @@
 # Shop Sync Changelog
 
+## 0.0.34-beta11
+
+- Check existing TikTok browser connections before each scan; reopen failed connections with the same saved profile instead of retaining a dead driver.
+- Recover from both disconnected browser sessions and unavailable ChromeDriver connections without deleting profile locks or replaying Shopify writes.
+- Show safe network, crashed-tab and disconnected-session diagnostics. TikTok login persistence across restarts still requires live verification.
+
 ## 0.0.32
 
 - Added automatic recovery for marketplace catalogue imports after an add-on crash, restart or Home Assistant reboot.

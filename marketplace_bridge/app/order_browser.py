@@ -11,6 +11,21 @@ from .order_models import SourceOrder, OrderProblem
 
 ORIGIN='https://seller-uk.tiktok.com'
 
+def browser_failure(exc):
+    """Only static categories reach status text, never raw driver messages."""
+    from selenium.common.exceptions import WebDriverException
+    if isinstance(exc,WebDriverException):
+        message=str(exc).lower()
+        for code in ('ERR_CONNECTION_RESET','ERR_CONNECTION_CLOSED','ERR_CONNECTION_TIMED_OUT',
+                     'ERR_TIMED_OUT','ERR_NETWORK_CHANGED','ERR_NAME_NOT_RESOLVED',
+                     'ERR_INTERNET_DISCONNECTED','ERR_HTTP2_PROTOCOL_ERROR',
+                     'ERR_QUIC_PROTOCOL_ERROR','ERR_EMPTY_RESPONSE','ERR_ABORTED','ERR_FAILED'):
+            if ('net::'+code).lower() in message: return code
+        if 'tab crashed' in message: return 'tab crashed'
+        if any(value in message for value in ('invalid session id','disconnected','chrome not reachable')):
+            return 'session disconnected'
+    return type(exc).__name__
+
 def lines(text):
     return [line.strip() for line in text.splitlines() if line.strip()]
 
@@ -135,7 +150,19 @@ class TikTokBrowser:
 
     def start(self):
         with self.lock:
-            if self.driver: return
+            if self.driver:
+                from selenium.common.exceptions import WebDriverException
+                from urllib3.exceptions import MaxRetryError, NewConnectionError, ReadTimeoutError
+                connection_errors=(WebDriverException,MaxRetryError,NewConnectionError,ReadTimeoutError)
+                try:
+                    self.driver.execute_script('return 1')
+                    return
+                except connection_errors:
+                    self.report('TikTok browser connection stopped; reopening the saved browser profile…')
+                    old=self.driver
+                    self.driver=None
+                    try: old.quit()
+                    except connection_errors: pass
             from selenium import webdriver
             from selenium.webdriver.chrome.service import Service
             options=webdriver.ChromeOptions()

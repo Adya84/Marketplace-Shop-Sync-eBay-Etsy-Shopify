@@ -121,7 +121,8 @@ def mount_orders(app,core,client_factory):
             except Exception as exc:
                 # Never expose raw driver/HTTP errors: they may contain buyer
                 # information, request headers or session capabilities.
-                store.configure(last_message=f'Scan stopped during {stage}: {type(exc).__name__}.')
+                from .order_browser import browser_failure
+                store.configure(last_message=f'Scan stopped during {stage}: {browser_failure(exc)}.')
             finally: last_completed=time.monotonic()
 
     def schedule(coro):
@@ -137,7 +138,8 @@ def mount_orders(app,core,client_factory):
                                 if refreshed else 'TikTok browser is not started; next check will start it.')
             except OrderProblem as exc: store.configure(last_message=str(exc))
             except Exception as exc:
-                store.configure(last_message=f'Between-check browser refresh failed: {type(exc).__name__}; next check will retry.')
+                from .order_browser import browser_failure
+                store.configure(last_message=f'Between-check browser refresh failed: {browser_failure(exc)}; next check will retry.')
 
     @asynccontextmanager
     async def lifespan(application):
