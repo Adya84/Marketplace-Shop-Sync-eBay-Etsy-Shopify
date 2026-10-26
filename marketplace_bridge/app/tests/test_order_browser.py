@@ -2,6 +2,60 @@ import pytest
 from app.order_browser import parse_detail, parse_tracking
 from app.order_models import OrderProblem
 
+@pytest.mark.parametrize('message,expected',[
+    ('unknown error: net::ERR_CONNECTION_RESET private-token','ERR_CONNECTION_RESET'),
+    ('invalid session id private-token','session disconnected'),
+    ('tab crashed private-token','tab crashed'),
+    ('unexpected private-token','WebDriverException'),
+])
+def test_driver_diagnostic_never_exposes_raw_errors(message,expected):
+    from selenium.common.exceptions import WebDriverException
+    from app.order_browser import browser_failure
+    assert browser_failure(WebDriverException(message)) == expected
+
+def test_start_reuses_healthy_session_without_navigation():
+    from app.order_browser import TikTokBrowser
+    class Driver:
+        def execute_script(self,script):
+            assert script == 'return 1'
+            return 1
+    browser=TikTokBrowser('saved-profile',lambda:{})
+    browser.driver=Driver(); original=browser.driver
+    browser.start()
+    assert browser.driver is original
+
+@pytest.mark.parametrize('transport',[False,True])
+def test_start_reopens_dead_session_with_same_profile(monkeypatch,transport):
+    from selenium.common.exceptions import InvalidSessionIdException
+    from selenium import webdriver
+    from app.order_browser import TikTokBrowser
+    calls=[]
+    class Dead:
+        def execute_script(self,_):
+            if transport:
+                from urllib3.exceptions import MaxRetryError
+                raise MaxRetryError(None,'local-driver')
+            raise InvalidSessionIdException('session gone')
+        def quit(self):
+            calls.append('quit')
+            if transport:
+                from urllib3.exceptions import MaxRetryError
+                raise MaxRetryError(None,'local-driver')
+    class Fresh:
+        def set_page_load_timeout(self,value): pass
+        def get(self,url): calls.append('loaded')
+    fresh=Fresh()
+    def create(**kwargs):
+        assert '--user-data-dir=saved-profile' in kwargs['options'].arguments
+        calls.append('created')
+        return fresh
+    monkeypatch.setattr(webdriver,'Chrome',create)
+    browser=TikTokBrowser('saved-profile',lambda:{})
+    browser.driver=Dead()
+    browser.start()
+    assert calls == ['quit','created','loaded']
+    assert browser.driver is fresh
+
 @pytest.mark.parametrize('count',[0,1])
 @pytest.mark.parametrize('redraw',[False,True])
 def test_queue_selects_packing_only_and_uses_filtered_count(count,redraw):
