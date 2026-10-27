@@ -67,6 +67,8 @@ def test_start_reopens_dead_session_with_same_profile(monkeypatch,transport):
     fresh=Fresh()
     def create(**kwargs):
         assert '--user-data-dir=saved-profile' in kwargs['options'].arguments
+        assert kwargs['service'].path=='/usr/local/bin/shop-sync-chromedriver'
+        assert kwargs['options'].binary_location=='/usr/bin/chromium-browser'
         calls.append('created')
         return fresh
     monkeypatch.setattr(webdriver,'Chrome',create)

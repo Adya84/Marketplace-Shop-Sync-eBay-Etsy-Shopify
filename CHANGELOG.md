@@ -1,5 +1,11 @@
 # Shop Sync Changelog
 
+## 0.0.34-beta13
+
+- Run ChromeDriver and Chromium as the same unprivileged user. Earlier releases ran ChromeDriver as root, creating a root-owned Default profile that Chromium could not write.
+- Repair ownership of existing browser profile files while preserving saved data and Chromium's sandbox.
+- Add a container regression check proving the old root-owned folder is unwritable, the repaired profile is writable, and saved files survive repeated preparation.
+
 ## 0.0.34-beta12
 
 - Detect TikTok login redirects before waiting for order tables, including sign-out during a scan or browser refresh. Pause imports and require a fresh preview instead of repeatedly reporting queue timeouts.

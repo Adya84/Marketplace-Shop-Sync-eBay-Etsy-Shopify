@@ -9,9 +9,7 @@ export SHOPIFY_API_VERSION="$(bashio::config 'shopify_api_version')"
 
 export DISPLAY=:99
 if command -v chromium-browser >/dev/null 2>&1; then
-    mkdir -p /config/tiktok-browser
-    chown shopsync-browser:shopsync-browser /config/tiktok-browser
-    chmod 700 /config/tiktok-browser
+    /usr/local/bin/shop-sync-prepare-profile
     Xvfb :99 -screen 0 1280x900x24 -nolisten tcp -ac &
     # Xvfb binds its display asynchronously. Recover if the viewer starts first.
     (
