@@ -19,6 +19,7 @@ from .order_models import SourceOrder, OrderProblem, SignInRequired
 from .order_store import OrderStore
 from .order_shopify import OrderShopify
 from .order_sync import OrderSync
+from .workspace_navigation import workspace_navigation
 
 
 async def desktop_ready(port=5900):
@@ -199,7 +200,7 @@ def mount_orders(app,core,client_factory):
         values={k:esc(str(config[k])) for k in ('shop_id','shop_name','target_shop')}
         return HTMLResponse('''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>TikTok order imports</title><style>body{font:16px system-ui;background:#f3f5fa;color:#18213b;margin:24px}main{max-width:1400px;margin:auto}section{background:white;padding:24px;margin:16px 0;border-radius:16px}input,textarea,button{font:inherit;padding:10px;margin:5px}label{display:block}textarea{width:95%;height:80px}button{cursor:pointer;background:#253e80;color:white;border:0;border-radius:7px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:left;padding:12px;border-bottom:1px solid #ddd;vertical-align:top}iframe{width:100%;height:720px;border:0}.scroll{overflow:auto}#status{white-space:pre-wrap}</style></head><body><main>
-        <a href="'''+esc(base)+'''/">← Shop Sync</a><h1>TikTok orders → Shopify</h1>
+        '''+workspace_navigation('orders',base)+'''<h1>TikTok orders → Shopify</h1>
         <p>Order-only beta. Paid, seller-fulfilled orders become physical Shopify orders for postage labels. No catalogue matching.</p>
         <section><h2>Connection and controls</h2><p id="status">'''+esc(config['last_message'])+'''</p><p id="last-success">Last completed scan: not recorded yet.</p>
         <p>Connected Shopify: <strong>'''+esc(domain or 'Not connected')+'''</strong>. Tracking return is manual in this beta.</p>

@@ -1,6 +1,6 @@
 # Master listing editor — 0.0.35-beta1
 
-Open **Create listing · Publish to all** from the Shop Sync dashboard. Enter the title, description, photos, tags, price, stock and SKU once. Add size/colour options to generate editable variation rows. Select the destinations; optional adjustments change a shop's title, description, tags or price without changing the master.
+Select **Listings** in the Shop Sync navigation to open its own page inside the app. **Dashboard**, **Listings** and **Order imports** have separate pages with links between them. Enter the title, description, photos, tags, price, stock and SKU once. Add size/colour options to generate editable variation rows. Select the destinations; optional adjustments change a shop's title, description, tags or price without changing the master.
 
 Set usual categories, policies, shipping profiles, processing profiles, warehouse and Shopify channel under **Shop defaults**. These are reused by later listings. Individual listings may override them. Load shop choices instead of typing account IDs when the API provides those choices. eBay currently takes a category ID; **Load required product details** loads the category's aspects. TikTok loads category attributes in the same way.
 

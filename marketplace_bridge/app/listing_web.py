@@ -11,6 +11,7 @@ from .listing_connections import Connections
 from .listing_store import ListingStore
 from .listings import ListingService, MARKETS
 from .order_web import ingress_peer
+from .workspace_navigation import workspace_navigation
 
 
 async def bounded_body(request,limit):
@@ -89,6 +90,7 @@ def mount_listings(app,core,shopify_factory):
         base=request.headers.get('x-ingress-path','').rstrip('/')
         if base and not re.fullmatch(r'/[A-Za-z0-9_/-]+',base): raise HTTPException(400,'Invalid Ingress path.')
         page=Path(__file__).with_name('listing_editor.html').read_text(encoding='utf-8')
+        page=page.replace('__WORKSPACE_NAV__',workspace_navigation('listings',base))
         return HTMLResponse(page.replace('__LISTING_CONFIG__',json.dumps({'csrf':csrf,'base':base+'/listings/'})))
 
     @app.get('/listings/api/drafts')
