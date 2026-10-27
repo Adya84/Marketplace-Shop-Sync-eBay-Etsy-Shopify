@@ -7,6 +7,9 @@ import re
 class OrderProblem(ValueError):
     pass
 
+class SignInRequired(OrderProblem):
+    pass
+
 
 def money(value):
     try:

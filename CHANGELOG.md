@@ -1,5 +1,12 @@
 # Shop Sync Changelog
 
+## 0.0.34-beta12
+
+- Detect TikTok login redirects before waiting for order tables, including sign-out during a scan or browser refresh. Pause imports and require a fresh preview instead of repeatedly reporting queue timeouts.
+- Accept a verified empty Awaiting packing queue as a successful preview.
+- Show the last completed scan time, enable viewer reconnection, and keep viewer disconnects from replacing importer status.
+- Login persistence and authenticated automatic checks require live verification; this release does not guarantee TikTok session duration.
+
 ## 0.0.34-beta11
 
 - Check existing TikTok browser connections before each scan; reopen failed connections with the same saved profile instead of retaining a dead driver.

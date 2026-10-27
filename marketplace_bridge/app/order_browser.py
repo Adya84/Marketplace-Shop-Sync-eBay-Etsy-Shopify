@@ -7,7 +7,7 @@ import re
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
-from .order_models import SourceOrder, OrderProblem
+from .order_models import SourceOrder, OrderProblem, SignInRequired
 
 ORIGIN='https://seller-uk.tiktok.com'
 
@@ -142,10 +142,12 @@ class TikTokBrowser:
     def refresh_idle(self):
         with self.lock:
             if not self.driver: return False
+            self.check_login()
             url=self.driver.current_url
             if urlparse(url).hostname!='seller-uk.tiktok.com':
                 raise OrderProblem('Sign in to TikTok in the browser panel')
             self.navigate(url,refresh=True)
+            self.check_login()
             return True
 
     def start(self):
@@ -183,7 +185,16 @@ class TikTokBrowser:
 
     def wait(self,fn):
         from selenium.webdriver.support.ui import WebDriverWait
-        return WebDriverWait(self.driver,30).until(lambda _:fn())
+        def ready(_):
+            self.check_login()
+            return fn()
+        return WebDriverWait(self.driver,30).until(ready)
+
+    def check_login(self):
+        url=urlparse(self.driver.current_url)
+        if url.hostname=='seller-uk-accounts.tiktok.com' or (
+            url.hostname=='seller-uk.tiktok.com' and url.path.startswith('/account/login')):
+            raise SignInRequired('TikTok sign-in expired; imports paused. Sign in in the browser panel, run a preview, then enable automatic imports.')
 
     def find_text(self,text,tag='*'):
         # Static selectors or validated labels; never interpolate order/customer data.
@@ -198,6 +209,7 @@ class TikTokBrowser:
 
     def guard(self):
         from selenium.webdriver.common.by import By
+        self.check_login()
         config=self.settings()
         if urlparse(self.driver.current_url).hostname!='seller-uk.tiktok.com':
             raise OrderProblem('Sign in to TikTok in the browser panel')
@@ -263,6 +275,7 @@ class TikTokBrowser:
             # Use the observed Seller Centre queue URL. Home-page card labels
             # can arrive as untranslated locale keys even after successful login.
             self.navigate(ORIGIN+'/order?order_status[]=1&selected_sort=1&shop_region=GB&tab=to_ship')
+            self.check_login()
             self.wait(lambda:bool(self.driver.find_elements(By.CSS_SELECTOR,'[role=tab]')))
             self.guard()
             # Home link can retain saved filters. Refuse filtered results until reset.
