@@ -22,3 +22,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22 -t shop-sync-orders:beta marketplace_bridge
+      - run: docker run --rm --entrypoint /bin/sh shop-sync-orders:beta /app/app/tests/test_profile_permissions.sh

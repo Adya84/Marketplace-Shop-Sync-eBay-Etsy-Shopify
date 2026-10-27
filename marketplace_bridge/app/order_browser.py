@@ -168,13 +168,13 @@ class TikTokBrowser:
             from selenium import webdriver
             from selenium.webdriver.chrome.service import Service
             options=webdriver.ChromeOptions()
-            options.binary_location='/usr/local/bin/shop-sync-chromium'
+            options.binary_location='/usr/bin/chromium-browser'
             options.add_argument('--user-data-dir='+self.profile)
             options.add_argument('--window-size=1280,900')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--no-first-run')
             options.add_argument('--restore-last-session')
-            self.driver=webdriver.Chrome(service=Service('/usr/bin/chromedriver'),options=options)
+            self.driver=webdriver.Chrome(service=Service('/usr/local/bin/shop-sync-chromedriver'),options=options)
             self.driver.set_page_load_timeout(60)
             self.navigate(ORIGIN+'/homepage')
 

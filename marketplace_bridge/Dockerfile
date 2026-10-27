@@ -10,6 +10,8 @@ COPY app /app/app
 COPY logo.png /app/logo.png
 COPY run.sh /run.sh
 COPY chromium-wrapper.sh /usr/local/bin/shop-sync-chromium
-RUN chmod a+x /run.sh /usr/local/bin/shop-sync-chromium
+COPY chromedriver-wrapper.sh /usr/local/bin/shop-sync-chromedriver
+COPY prepare-browser-profile.sh /usr/local/bin/shop-sync-prepare-profile
+RUN chmod a+x /run.sh /usr/local/bin/shop-sync-chromium /usr/local/bin/shop-sync-chromedriver /usr/local/bin/shop-sync-prepare-profile
 
 CMD ["/run.sh"]
