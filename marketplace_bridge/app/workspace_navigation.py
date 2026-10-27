@@ -7,7 +7,7 @@ def workspace_navigation(active,base='.'):
     if base!='.' and not re.fullmatch(r'(?:/[A-Za-z0-9_-]+)*',base):
         raise ValueError('Invalid Shop Sync base path')
     links=[]
-    for key,path,label in (('dashboard','/','Dashboard'),('listings','/listings','Listings'),('orders','/orders','Order imports')):
+    for key,path,label in (('dashboard','/','Dashboard'),('listings','/listing-tool','Listing tool'),('orders','/orders','Order imports')):
         current=' aria-current="page"' if active==key else ''
         background='#246342' if active==key else '#edf2eb'
         color='white' if active==key else '#294630'

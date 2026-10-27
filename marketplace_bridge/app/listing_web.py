@@ -69,7 +69,7 @@ def mount_listings(app,core,shopify_factory):
 
     @app.middleware('http')
     async def protect(request:Request,call_next):
-        if request.url.path=='/listings' or request.url.path.startswith('/listings/'):
+        if request.url.path in ('/listings','/listing-tool') or request.url.path.startswith('/listings/'):
             if not request.client or not ingress_peer(request.client.host): return Response('Open through Home Assistant Ingress.',status_code=403)
             if request.method not in ('GET','HEAD') and not secrets.compare_digest(request.headers.get('x-listing-csrf',''),csrf): return Response('Reload Listings before making changes.',status_code=403)
             response=await call_next(request)
@@ -86,12 +86,21 @@ def mount_listings(app,core,shopify_factory):
         except (ValueError,UnicodeDecodeError): raise HTTPException(400,'Invalid listing data.')
 
     @app.get('/listings',response_class=HTMLResponse)
+    @app.get('/listing-tool',response_class=HTMLResponse)
     async def editor(request:Request):
         base=request.headers.get('x-ingress-path','').rstrip('/')
         if base and not re.fullmatch(r'/[A-Za-z0-9_/-]+',base): raise HTTPException(400,'Invalid Ingress path.')
         page=Path(__file__).with_name('listing_editor.html').read_text(encoding='utf-8')
         page=page.replace('__WORKSPACE_NAV__',workspace_navigation('listings',base))
-        return HTMLResponse(page.replace('__LISTING_CONFIG__',json.dumps({'csrf':csrf,'base':base+'/listings/'})))
+        viewer=getattr(app.state,'tiktok_browser_view_url',None)
+        return HTMLResponse(page.replace('__LISTING_CONFIG__',json.dumps({'csrf':csrf,'base':base+'/listings/',
+            'browser_view':viewer(base) if viewer else ''})))
+
+    @app.post('/listings/api/tiktok/browser/open')
+    async def open_tiktok_browser():
+        opener=getattr(app.state,'tiktok_open_listing_browser',None)
+        if opener is None: raise HTTPException(503,'Open Listing tool in the installed Shop Sync app to use its TikTok browser.')
+        return await opener()
 
     @app.get('/listings/api/drafts')
     async def drafts(): return [{'id':row['id'],'title':row['title'],'revision':row['revision'],'updated':row['updated'],'photos':row.get('photos',[]),'results':store.results(row['id'])} for row in store.list()]

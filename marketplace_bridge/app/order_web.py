@@ -62,6 +62,12 @@ def mount_orders(app,core,client_factory):
     csrf=secrets.token_urlsafe(32)
     instance=secrets.token_hex(16) # Public restart marker, never an authentication token.
     run_lock=asyncio.Lock()
+    app.state.tiktok_browser=browser
+    app.state.tiktok_browser_lock=run_lock
+    def browser_view_url(base):
+        socket=base+'/orders/desktop/websockify?token='+csrf
+        return base+'/orders/desktop/vnc.html?autoconnect=true&reconnect=true&reconnect_delay=3000&resize=scale&path='+quote(socket,safe='')
+    app.state.tiktok_browser_view_url=browser_view_url
     last_completed=None
     tasks=set()
     previous=app.router.lifespan_context
@@ -275,6 +281,15 @@ def mount_orders(app,core,client_factory):
             except Exception:
                 store.configure(last_message='Browser unavailable. Check supported host architecture and Chromium sandbox support.')
         schedule(start()); return {'started':True}
+
+    async def open_listing_browser():
+        if run_lock.locked(): raise HTTPException(409,'An order scan is running. Wait for it to finish before opening the listing browser.')
+        async with run_lock:
+            if not await desktop_ready(): raise HTTPException(503,'The TikTok browser display is unavailable on this host.')
+            try: return await asyncio.to_thread(browser.open_listing_editor)
+            except OrderProblem as exc: raise HTTPException(400,str(exc))
+            except Exception: raise HTTPException(503,'The TikTok listing browser could not be opened. Check the browser session and try again.')
+    app.state.tiktok_open_listing_browser=open_listing_browser
 
     @app.get('/orders/desktop/{path:path}')
     async def desktop(path:str):
