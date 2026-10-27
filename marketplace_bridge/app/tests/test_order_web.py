@@ -95,6 +95,10 @@ def test_ingress_csrf_and_default_off(workspace,monkeypatch):
         page=client.get('/orders')
         assert page.status_code==200
         assert 'reconnect=true&amp;reconnect_delay=3000' in page.text
+        status=client.get('/orders/status').json()
+        assert status['instance']
+        assert status['instance'] in page.text
+        assert 's.instance!==cfg.instance' in page.text
         assert 'test.myshopify.com' in page.text
         assert client.post('/orders/scan').status_code==403
         csrf=re.search(r'"csrf": "([^"]+)"',page.text)[1]
