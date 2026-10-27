@@ -3,11 +3,24 @@ import base64
 import time
 import httpx
 from .etsy_broker import BrokerEtsyClient
-from .listing_publishers import EtsyPublisher, EbayPublisher, TikTokPublisher, ShopifyPublisher, PUBLICATIONS
-from .tiktok import TikTokShopClient
+from .listing_publishers import EtsyPublisher, EbayPublisher, ShopifyPublisher, PUBLICATIONS
 
 
 class ListingEtsyClient(BrokerEtsyClient):
+    def __init__(self,*args,persist=None,**kwargs):
+        super().__init__(*args,**kwargs)
+        self.persist=persist or (lambda _:None)
+
+    async def _refresh(self):
+        await super()._refresh()
+        self.persist(self.credential_payload())
+
+    async def supports_image_upload(self):
+        async with httpx.AsyncClient(timeout=15) as client:
+            response=await client.get(self.broker_url+'/health')
+            response.raise_for_status()
+            return response.json().get('features',{}).get('etsy_listing_images') is True
+
     async def upload_image(self,listing_id,name,data,mime,rank):
         if self.refresh_token and (not self.expires_at or time.time()>=self.expires_at-300): await self._refresh()
         payload={'access_token':self.access_token,'broker_key':self.broker_key,'method':'POST',
@@ -20,14 +33,18 @@ class ListingEtsyClient(BrokerEtsyClient):
 
 
 class Connections:
-    def __init__(self,core,shopify_factory,photos):
+    def __init__(self,core,shopify_factory,photos,tiktok_browser_publisher=None):
         self.core=core; self.shopify_factory=shopify_factory; self.photos=photos
+        self.tiktok_browser_publisher=tiktok_browser_publisher
 
     def writer(self,destination):
+        if destination=='tiktok':
+            if self.tiktok_browser_publisher is None:
+                raise ValueError('TikTok browser publishing still needs setup. Your listing is saved; it has not been sent to TikTok.')
+            return self.tiktok_browser_publisher
         credential=self.core.get_credentials(destination)
         if destination=='shopify': return ShopifyPublisher(self.shopify_factory(credential),self.photos)
-        if destination=='etsy': return EtsyPublisher(ListingEtsyClient(**credential),self.photos)
-        if destination=='tiktok': return TikTokPublisher(TikTokShopClient(credential['app_key'],credential['app_secret'],credential['access_token'],credential['shop_cipher']),self.photos)
+        if destination=='etsy': return EtsyPublisher(ListingEtsyClient(**credential,persist=lambda updated:self.core.save_credentials('etsy',updated)),self.photos)
         # eBay's credentials are refreshed in prepare(), before snapshot validation.
         return EbayPublisher(credential['access_token'],self.photos,self.core.settings.ebay_marketplace,self.core.settings.ebay_environment)
 
@@ -50,14 +67,8 @@ class Connections:
             result=await writer.client.request('GET',paths[kind])
             return result.get('results') or []
         if destination=='tiktok':
-            paths={'categories':'/product/202309/categories','warehouses':'/logistics/202309/warehouses'}
-            if kind in ('attributes','rules'):
-                if not category.isdigit(): raise ValueError('Choose a TikTok category first.')
-                path=f'/product/202309/categories/{category}/{kind}'
-            else: path=paths.get(kind)
-            if not path: raise ValueError('Unknown shop setting.')
-            result=await writer.client._request('GET',path)
-            return result
+            if not hasattr(writer,'options'): raise ValueError('Choose TikTok product settings in its browser.')
+            return await writer.options(kind,category)
         if destination=='ebay':
             host='https://api.ebay.com' if writer.environment=='production' else 'https://api.sandbox.ebay.com'
             paths={'payment':'/sell/account/v1/payment_policy','returns':'/sell/account/v1/return_policy',

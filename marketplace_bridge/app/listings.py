@@ -70,6 +70,7 @@ class ListingService:
             listing=effective_listing(master,destination,self.store.defaults(destination))
             errors=validate_listing(listing)
             try: errors+=await self.writer_factory(destination).validate(listing,listing['settings'])
+            except ValueError as exc: errors.append(str(exc))
             except Exception: errors.append(f'Connect {destination.title()} and check its saved shop settings.')
             output[destination]=list(dict.fromkeys(errors))
         return output
@@ -91,6 +92,8 @@ class ListingService:
                 try:
                     writer=self.writer_factory(destination)
                     errors+=await writer.validate(listing,listing['settings'])
+                except ValueError as exc:
+                    errors.append(str(exc))
                 except Exception:
                     errors.append(f'Connect {destination.title()} and check its saved shop settings.')
                 if errors:

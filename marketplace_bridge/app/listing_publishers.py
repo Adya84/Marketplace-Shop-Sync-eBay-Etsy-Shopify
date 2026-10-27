@@ -99,6 +99,8 @@ class EtsyPublisher:
 
     async def validate(self,listing,settings):
         issues=[f'Choose Etsy {name.replace("_id", "").replace("_", " ")}.' for name in ('taxonomy_id','shipping_profile_id','readiness_state_id','return_policy_id') if not settings.get(name)]
+        if hasattr(self.client,'supports_image_upload') and not await self.client.supports_image_upload():
+            issues.append('The Etsy photo-upload service needs updating before this listing can be sent. Your draft is saved here.')
         shop=await self.client.request('GET',f'/v3/application/shops/{self.client.shop_id}')
         currency=shop.get('currency_code')
         if currency and currency!=listing['currency']: issues.append('The listing currency must match your Etsy shop currency ('+currency+').')

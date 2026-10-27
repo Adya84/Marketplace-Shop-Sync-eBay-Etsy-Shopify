@@ -151,6 +151,9 @@ def mount_listings(app,core,shopify_factory):
     async def defaults():
         connected={}
         for destination in MARKETS:
+            if destination=='tiktok':
+                connected[destination]=connections.tiktok_browser_publisher is not None
+                continue
             try: connected[destination]=bool(core.get_credentials(destination))
             except Exception: connected[destination]=False
         return {'defaults':{d:store.defaults(d) for d in MARKETS},'connected':connected}

@@ -167,6 +167,7 @@ class EtsyApiRequest(EtsyApiGetRequest):
 def health():
     return {
         "status": "ok",
+        "features": {"etsy_listing_images": True},
         "ebay_configured": bool(EBAY_CLIENT_ID and EBAY_CLIENT_SECRET and EBAY_RUNAME),
         "etsy_configured": bool(ETSY_KEYSTRING and ETSY_SHARED_SECRET and ETSY_REDIRECT_URI),
     }
