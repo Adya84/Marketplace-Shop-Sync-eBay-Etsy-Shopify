@@ -2,6 +2,26 @@ import pytest
 from app.order_browser import parse_detail, parse_tracking
 from app.order_models import OrderProblem
 
+def test_queue_login_redirect_is_detected_before_waiting_for_order_tabs():
+    from app.order_browser import TikTokBrowser
+    class Driver:
+        current_url='https://seller-uk-accounts.tiktok.com/account/login?private=value'
+        def get(self,_): pass
+        def find_elements(self,*_): raise AssertionError('must not inspect queue while signed out')
+    browser=TikTokBrowser('unused',lambda:{})
+    browser.driver=Driver()
+    with pytest.raises(OrderProblem,match='sign-in expired'):
+        browser.scan_ids()
+
+def test_wait_detects_login_redirect_without_waiting_for_timeout():
+    from app.order_browser import TikTokBrowser
+    class Driver:
+        current_url='https://seller-uk-accounts.tiktok.com/account/login'
+    browser=TikTokBrowser('unused',lambda:{})
+    browser.driver=Driver()
+    with pytest.raises(OrderProblem,match='sign-in expired'):
+        browser.wait(lambda:False)
+
 @pytest.mark.parametrize('message,expected',[
     ('unknown error: net::ERR_CONNECTION_RESET private-token','ERR_CONNECTION_RESET'),
     ('invalid session id private-token','session disconnected'),
@@ -82,6 +102,7 @@ def test_queue_selects_packing_only_and_uses_filtered_count(count,redraw):
         def get_attribute(self,_): return ORIGIN+'/order/detail?order_no='+self.i
         def find_element(self,*_): return Element('Awaiting packing' if selected[0] else 'Awaiting collection')
     class Driver:
+        current_url=ORIGIN+'/order'
         def get(self,_): pass
         def find_elements(self,by,selector):
             if selector=='[role=tab]': return [Element('To ship 24')]

@@ -3,17 +3,19 @@ import asyncio
 import contextlib
 import html
 import json
+import logging
 import os
 import re
 import secrets
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from urllib.parse import quote
 import httpx
 from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from .order_browser import TikTokBrowser
-from .order_models import SourceOrder, OrderProblem
+from .order_models import SourceOrder, OrderProblem, SignInRequired
 from .order_store import OrderStore
 from .order_shopify import OrderShopify
 from .order_sync import OrderSync
@@ -57,6 +59,7 @@ def mount_orders(app,core,client_factory):
     browser=TikTokBrowser(core.settings.data_dir/'tiktok-browser',store.settings,
                          lambda message:store.configure(last_message=message))
     csrf=secrets.token_urlsafe(32)
+    instance=secrets.token_hex(16) # Public restart marker, never an authentication token.
     run_lock=asyncio.Lock()
     last_completed=None
     tasks=set()
@@ -92,6 +95,8 @@ def mount_orders(app,core,client_factory):
                     store.configure(last_message=f'Checking order {position} of {len(pending)}…')
                     try:
                         order=await asyncio.to_thread(browser.detail,order_id)
+                    except SignInRequired:
+                        raise
                     except Exception as exc:
                         # Retain a durable review record without logging customer content.
                         old=store.get(config['shop_id'],order_id)
@@ -112,10 +117,13 @@ def mount_orders(app,core,client_factory):
                     await sync.sync_tracking(order,browser,writes=False)
                 # Detail failures remain durable review rows and never reach
                 # creation. They must not block independently validated orders.
-                if dry: store.configure(preview_verified=ready>0)
+                if dry: store.configure(preview_verified=not ids or ready>0)
+                store.configure(last_success_at=datetime.now(timezone.utc).isoformat())
                 store.configure(last_message=f'Scan complete: {len(ids)} Awaiting packing orders inspected. '+
                                 ('Preview only.' if not writes else 'Import run finished.')+
                                 (f' {failures} orders need source review.' if failures else ''))
+            except SignInRequired as exc:
+                store.configure(enabled=False,preview_verified=False,last_message=str(exc))
             except OrderProblem as exc:
                 store.configure(last_message=str(exc))
             except Exception as exc:
@@ -136,6 +144,7 @@ def mount_orders(app,core,client_factory):
                 refreshed=await asyncio.to_thread(browser.refresh_idle)
                 store.configure(last_message='TikTok browser refreshed; next automatic check in about one minute.'
                                 if refreshed else 'TikTok browser is not started; next check will start it.')
+            except SignInRequired as exc: store.configure(enabled=False,preview_verified=False,last_message=str(exc))
             except OrderProblem as exc: store.configure(last_message=str(exc))
             except Exception as exc:
                 from .order_browser import browser_failure
@@ -186,13 +195,13 @@ def mount_orders(app,core,client_factory):
                 (row['source_id'],row['state'],summary,delivery,payload.get('total',''),row['message'],tracking))+'</tr>')
         try: domain=core.get_credentials('shopify').get('shop_domain','')
         except Exception: domain=''
-        boot=json.dumps({'csrf':csrf,'base':base},ensure_ascii=True).replace('<','\\u003c')
+        boot=json.dumps({'csrf':csrf,'base':base,'instance':instance},ensure_ascii=True).replace('<','\\u003c')
         values={k:esc(str(config[k])) for k in ('shop_id','shop_name','target_shop')}
         return HTMLResponse('''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>TikTok order imports</title><style>body{font:16px system-ui;background:#f3f5fa;color:#18213b;margin:24px}main{max-width:1400px;margin:auto}section{background:white;padding:24px;margin:16px 0;border-radius:16px}input,textarea,button{font:inherit;padding:10px;margin:5px}label{display:block}textarea{width:95%;height:80px}button{cursor:pointer;background:#253e80;color:white;border:0;border-radius:7px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:left;padding:12px;border-bottom:1px solid #ddd;vertical-align:top}iframe{width:100%;height:720px;border:0}.scroll{overflow:auto}#status{white-space:pre-wrap}</style></head><body><main>
         <a href="'''+esc(base)+'''/">← Shop Sync</a><h1>TikTok orders → Shopify</h1>
         <p>Order-only beta. Paid, seller-fulfilled orders become physical Shopify orders for postage labels. No catalogue matching.</p>
-        <section><h2>Connection and controls</h2><p id="status">'''+esc(config['last_message'])+'''</p>
+        <section><h2>Connection and controls</h2><p id="status">'''+esc(config['last_message'])+'''</p><p id="last-success">Last completed scan: not recorded yet.</p>
         <p>Connected Shopify: <strong>'''+esc(domain or 'Not connected')+'''</strong>. Tracking return is manual in this beta.</p>
         <label>TikTok shop name <input id="shop_name" value="'''+values['shop_name']+'''"></label>
         <label>TikTok shop ID <input id="shop_id" value="'''+values['shop_id']+'''"></label>
@@ -203,9 +212,9 @@ def mount_orders(app,core,client_factory):
         <button onclick="save()">Save settings</button><button onclick="act('scan')">Scan and preview</button><button id="import-now" onclick="act('import')">Import TikTok orders now</button><button onclick="act('browser/start')">Start TikTok browser</button><button onclick="location.reload()">Refresh orders</button><p id="action-status" role="status"></p>
         <p>Start the browser, sign in below, save the verified account and actual weights, then preview before enabling imports. Session expiry pauses imports until you sign in again.</p></section>
         <section><h2>TikTok browser</h2><p>Sign in here on this Home Assistant host. Your browser session stays in the app’s private configuration.</p>
-        <iframe title="TikTok sign in" src="'''+esc(base)+'''/orders/desktop/vnc.html?autoconnect=true&amp;resize=scale&amp;path='''+quote(base+'/orders/desktop/websockify?token='+csrf,safe='')+'''"></iframe></section>
+        <iframe title="TikTok sign in" src="'''+esc(base)+'''/orders/desktop/vnc.html?autoconnect=true&amp;reconnect=true&amp;reconnect_delay=3000&amp;resize=scale&amp;path='''+quote(base+'/orders/desktop/websockify?token='+csrf,safe='')+'''"></iframe></section>
         <section><h2>Import preview and review</h2><p>Unknown weights, masked addresses, discounts that do not reconcile, cancelled orders and multiple parcels need review. No labels are purchased automatically.</p><div class="scroll"><table><thead><tr><th>TikTok order</th><th>Status</th><th>Items</th><th>Delivery</th><th>GBP</th><th>Review</th><th>Tracking</th></tr></thead><tbody>'''+''.join(rows)+'''</tbody></table></div></section>
-        </main><script>const cfg='''+boot+''';let busy=false;async function status(){try{const r=await fetch(cfg.base+'/orders/status',{cache:'no-store'});if(!r.ok)return;const s=await r.json();document.getElementById('import-now').disabled=s.running;document.getElementById('status').textContent=(s.running?'Working… ':'')+s.message+' '+(s.automatic?'Automatic import is on (5 minute interval).':'Automatic import is off.')}catch(e){}}async function send(path,body){const r=await fetch(cfg.base+'/orders/'+path,{method:'POST',headers:{'content-type':'application/json','x-order-csrf':cfg.csrf},body:JSON.stringify(body||{})});const text=await r.text();if(!r.ok){let detail=text;try{detail=JSON.parse(text).detail||text}catch(e){}document.getElementById('action-status').textContent=detail;return false}await status();return true}async function act(path){if(busy)return;busy=true;document.getElementById('action-status').textContent='Sending request…';try{if(await send(path)){document.getElementById('action-status').textContent=path==='import'?'Import request accepted. Follow live progress above.':path==='scan'?'Preview request accepted. Follow live progress above.':'Browser start requested.';await status()}}catch(e){document.getElementById('action-status').textContent='Could not reach Shop Sync. Reload this page and try again.'}finally{busy=false}}async function save(){try{await send('settings',{shop_name:document.getElementById('shop_name').value,shop_id:document.getElementById('shop_id').value,target_shop:document.getElementById('target_shop').value,weights:JSON.parse(document.getElementById('weights').value),carriers:JSON.parse(document.getElementById('carriers').value),enabled:document.getElementById('enabled').checked});await status()}catch(e){document.getElementById('status').textContent='Check the JSON settings.'}}status();setInterval(status,3000)</script></body></html>''')
+        </main><script>const cfg='''+boot+''';let busy=false;async function status(){try{const r=await fetch(cfg.base+'/orders/status',{cache:'no-store'});if(!r.ok)return;const s=await r.json();if(s.instance!==cfg.instance){location.reload();return}document.getElementById('last-success').textContent='Last completed scan: '+(s.last_success_at?new Date(s.last_success_at).toLocaleString('en-GB',{timeZone:'Europe/London'}):'not recorded yet')+'.';document.getElementById('import-now').disabled=s.running;document.getElementById('status').textContent=(s.running?'Working… ':'')+s.message+' '+(s.automatic?'Automatic import is on (5 minute interval).':'Automatic import is off.')}catch(e){}}async function send(path,body){const r=await fetch(cfg.base+'/orders/'+path,{method:'POST',headers:{'content-type':'application/json','x-order-csrf':cfg.csrf},body:JSON.stringify(body||{})});const text=await r.text();if(!r.ok){let detail=text;try{detail=JSON.parse(text).detail||text}catch(e){}document.getElementById('action-status').textContent=detail;return false}await status();return true}async function act(path){if(busy)return;busy=true;document.getElementById('action-status').textContent='Sending request…';try{if(await send(path)){document.getElementById('action-status').textContent=path==='import'?'Import request accepted. Follow live progress above.':path==='scan'?'Preview request accepted. Follow live progress above.':'Browser start requested.';await status()}}catch(e){document.getElementById('action-status').textContent='Could not reach Shop Sync. Reload this page and try again.'}finally{busy=false}}async function save(){try{await send('settings',{shop_name:document.getElementById('shop_name').value,shop_id:document.getElementById('shop_id').value,target_shop:document.getElementById('target_shop').value,weights:JSON.parse(document.getElementById('weights').value),carriers:JSON.parse(document.getElementById('carriers').value),enabled:document.getElementById('enabled').checked});await status()}catch(e){document.getElementById('status').textContent='Check the JSON settings.'}}status();setInterval(status,3000)</script></body></html>''')
 
     @app.post('/orders/settings')
     async def configure(request:Request):
@@ -250,7 +259,8 @@ def mount_orders(app,core,client_factory):
     @app.get('/orders/status')
     async def order_status():
         config=store.settings()
-        return {'message':config['last_message'],'running':run_lock.locked(),'automatic':config['enabled']}
+        return {'message':config['last_message'],'running':run_lock.locked(),'automatic':config['enabled'],
+                'last_success_at':config.get('last_success_at'),'instance':instance}
 
     @app.post('/orders/browser/start')
     async def start_browser():
@@ -303,7 +313,7 @@ def mount_orders(app,core,client_factory):
                     await asyncio.gather(*bridges,return_exceptions=True)
         except WebSocketDisconnect: pass
         except Exception as exc:
-            store.configure(last_message='Desktop connection failed ('+type(exc).__name__+'). Check the Shop Sync log for display-service errors.')
+            logging.getLogger(__name__).warning('Desktop viewer connection ended (%s)',type(exc).__name__)
         finally:
             with contextlib.suppress(Exception): await websocket.close()
     return store

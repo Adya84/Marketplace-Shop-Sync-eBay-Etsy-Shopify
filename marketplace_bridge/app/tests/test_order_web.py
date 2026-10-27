@@ -6,6 +6,45 @@ from fastapi.testclient import TestClient
 from app.order_web import mount_orders
 from app.security import SecretBox
 
+@pytest.mark.parametrize('signed_out',[False,True])
+def test_empty_queue_verifies_preview_but_signout_pauses_without_writes(tmp_path,monkeypatch,signed_out):
+    import threading
+    import app.order_web as web
+    from app.order_models import SignInRequired
+    monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
+    finished=threading.Event()
+    class Browser:
+        def __init__(self,*_): pass
+        def start(self): pass
+        def close(self): pass
+        def scan_ids(self):
+            if signed_out: raise SignInRequired('TikTok sign-in expired; sign in again.')
+            return []
+    class Shopify:
+        def __init__(self,*_): pass
+        async def check_scopes(self,**_): pass
+    original=web.OrderStore.configure
+    def configure(self,**values):
+        original(self,**values)
+        if values.get('last_message','').startswith(('Scan complete:','TikTok sign-in expired')):
+            finished.set()
+    monkeypatch.setattr(web,'TikTokBrowser',Browser)
+    monkeypatch.setattr(web,'OrderShopify',Shopify)
+    monkeypatch.setattr(web.OrderStore,'configure',configure)
+    core=SimpleNamespace(settings=SimpleNamespace(data_dir=tmp_path),secrets=SecretBox.from_file(tmp_path/'key'),
+                         get_credentials=lambda _:dict(shop_domain='test.myshopify.com'))
+    app=FastAPI(); store=mount_orders(app,core,lambda _:None)
+    store.configure(target_shop='test.myshopify.com',preview_verified=True)
+    with TestClient(app) as client:
+        csrf=re.search(r'"csrf": "([^"]+)"',client.get('/orders').text)[1]
+        store.configure(enabled=True)
+        assert client.post('/orders/scan',headers={'x-order-csrf':csrf}).status_code==200
+        assert finished.wait(3)
+        assert store.settings()['enabled'] is not signed_out
+        assert store.settings().get('preview_verified',False) is not signed_out
+        assert bool(store.settings().get('last_success_at')) is not signed_out
+        assert store.list_orders()==[]
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('manual_finish',[None,30])
 async def test_scheduler_refreshes_four_minutes_after_latest_check_leaving_one_minute(manual_finish):
@@ -55,6 +94,11 @@ def test_ingress_csrf_and_default_off(workspace,monkeypatch):
     with TestClient(app) as client:
         page=client.get('/orders')
         assert page.status_code==200
+        assert 'reconnect=true&amp;reconnect_delay=3000' in page.text
+        status=client.get('/orders/status').json()
+        assert status['instance']
+        assert status['instance'] in page.text
+        assert 's.instance!==cfg.instance' in page.text
         assert 'test.myshopify.com' in page.text
         assert client.post('/orders/scan').status_code==403
         csrf=re.search(r'"csrf": "([^"]+)"',page.text)[1]
