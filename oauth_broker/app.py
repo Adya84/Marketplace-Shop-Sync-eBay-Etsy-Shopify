@@ -12,7 +12,8 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+import re
 
 app = FastAPI(title="Shop Sync OAuth Broker", version="1.1")
 
@@ -149,6 +150,17 @@ class EtsyApiGetRequest(BaseModel):
     broker_key: str
     path: str
     params: dict = {}
+
+
+class EtsyApiRequest(EtsyApiGetRequest):
+    method: str = 'GET'
+    form: dict | None = None
+    image: dict | None = None
+
+    model_config = {'populate_by_name': True}
+
+    # Add-on clients use the transport key "json".
+    json_data: dict | None = Field(default=None, alias='json')
 
 
 @app.get("/health")
@@ -391,3 +403,37 @@ async def etsy_api_get(request: EtsyApiGetRequest):
         detail = response.text[:500] or "Etsy API request failed"
         raise HTTPException(response.status_code, detail)
     return response.json()
+
+
+@app.post('/api/etsy/api/request')
+async def etsy_api_request(request: EtsyApiRequest):
+    """Listing writes and bounded image uploads without exposing publisher secrets."""
+    _require_etsy_config()
+    if not request.access_token or not hmac.compare_digest(request.broker_key,_etsy_broker_key(request.access_token)):
+        raise HTTPException(401,'Invalid Shop Sync Etsy API credential')
+    path=request.path.strip(); method=request.method.upper()
+    if method not in {'GET','POST','PATCH','PUT','DELETE'} or not re.fullmatch(r'/v3/application/[A-Za-z0-9_/-]+',path):
+        raise HTTPException(400,'Invalid Etsy API request')
+    if method!='GET' and not re.fullmatch(r'/v3/application/(shops/[0-9]+/listings(/[0-9]+(/images(/[0-9]+)?)?)?|listings/[0-9]+/inventory)',path):
+        raise HTTPException(400,'Only listing writes are supported')
+    headers={'x-api-key':f'{ETSY_KEYSTRING}:{ETSY_SHARED_SECRET}','Authorization':f'Bearer {request.access_token}'}
+    kwargs={'params':request.params,'headers':headers}
+    if request.image:
+        if method!='POST' or not re.fullmatch(r'/v3/application/shops/[0-9]+/listings/[0-9]+/images',path): raise HTTPException(400,'Invalid image upload path')
+        image=request.image; encoded=image.get('data','')
+        if not isinstance(encoded,str) or len(encoded)>14*1024*1024: raise HTTPException(413,'Image exceeds 10 MB')
+        try: data=base64.b64decode(encoded,validate=True)
+        except (ValueError,TypeError): raise HTTPException(400,'Invalid image data')
+        mime=image.get('content_type')
+        if len(data)>10*1024*1024: raise HTTPException(413,'Image exceeds 10 MB')
+        if not ((mime=='image/jpeg' and data.startswith(b'\xff\xd8\xff')) or (mime=='image/png' and data.startswith(b'\x89PNG\r\n\x1a\n'))): raise HTTPException(400,'Invalid JPEG or PNG image')
+        kwargs['files']={'image':('listing.png' if mime=='image/png' else 'listing.jpg',data,mime)}
+        kwargs['data']=request.form or {}
+    elif request.json_data is not None: kwargs['json']=request.json_data
+    elif request.form is not None: kwargs['data']=request.form
+    async with httpx.AsyncClient(timeout=90) as client:
+        response=await client.request(method,'https://api.etsy.com'+path,**kwargs)
+    if response.status_code>=400:
+        # Upstream validation messages help the seller correct the listing.
+        raise HTTPException(response.status_code,response.text[:500] or 'Etsy rejected the request')
+    return response.json() if response.content else {}

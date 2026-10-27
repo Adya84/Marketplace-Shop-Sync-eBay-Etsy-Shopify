@@ -1,3 +1,9 @@
+## 0.0.35-beta1
+
+- Add a Shop Sync master listing editor with one shared photo upload, variants, shop defaults and optional marketplace adjustments.
+- Add explicit Publish to all / Update all and persistent per-shop results, mappings, retries and reconciliation.
+- Add four marketplace publishing adapters and an Etsy broker image-upload transport; connected-shop acceptance and publisher deployment are still required.
+
 # Shop Sync Changelog
 
 ## 0.0.34-beta13

@@ -44,7 +44,7 @@ class TikTokShopClient:
             response.raise_for_status()
             payload = response.json()
         if payload.get("code") not in (None, 0, "0"):
-            raise RuntimeError(payload.get("message") or f"TikTok Shop error {payload.get('code')}")
+            raise ValueError(payload.get("message") or f"TikTok Shop error {payload.get('code')}")
         return payload.get("data") or {}
 
     async def test(self) -> dict[str, Any]:
