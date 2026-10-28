@@ -1,7 +1,7 @@
 name: Shop Sync
-version: "0.0.34-beta13"
+version: "0.0.35-beta1"
 slug: marketplace_bridge
-description: Transfer complete marketplace listings and keep Shopify as the catalogue master.
+description: Create one listing for Etsy, eBay, TikTok Shop and Shopify, with manual Update all.
 url: https://github.com/Adya84/Marketplace-Shop-Sync-eBay-Etsy-Shopify
 arch:
   - amd64

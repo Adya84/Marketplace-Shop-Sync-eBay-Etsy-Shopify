@@ -113,12 +113,60 @@ class TikTokBrowser:
         self.profile=str(profile); self.settings=settings; self.driver=None
         self.report=report or (lambda _:None)
         self.lock=threading.RLock()
+        self.order_window=None
+        self.listing_window=None
+
+    def select_order_window(self):
+        """Give order navigation its own tab; never reuse a product form."""
+        handles=getattr(self.driver,'window_handles',None)
+        if handles is None: return
+        current=self.driver.current_window_handle
+        current_url=urlparse(self.driver.current_url)
+        product=current_url.hostname=='seller-uk.tiktok.com' and current_url.path.startswith('/product/')
+        if product:
+            self.listing_window=current
+            if self.order_window==current: self.order_window=None
+        if self.order_window in handles and self.order_window!=self.listing_window:
+            self.driver.switch_to.window(self.order_window)
+            return
+        for handle in handles:
+            if handle==self.listing_window: continue
+            self.driver.switch_to.window(handle)
+            url=urlparse(self.driver.current_url)
+            if (url.hostname=='seller-uk.tiktok.com' and url.path.startswith(('/order','/homepage'))) or self.driver.current_url=='about:blank':
+                self.order_window=handle
+                return
+        self.driver.switch_to.new_window('tab')
+        self.order_window=self.driver.current_window_handle
+
+    def open_listing_editor(self):
+        """Open the observed Seller Center editor in a dedicated browser tab."""
+        with self.lock:
+            self.start()
+            handles=self.driver.window_handles
+            if self.listing_window in handles:
+                self.driver.switch_to.window(self.listing_window)
+            else:
+                self.driver.switch_to.new_window('tab')
+                self.listing_window=self.driver.current_window_handle
+            current=urlparse(self.driver.current_url)
+            if current.hostname!='seller-uk.tiktok.com' or current.path!='/product/create':
+                if current.hostname=='seller-uk.tiktok.com' and current.path.startswith('/product/') and current.path!='/product/manage':
+                    raise OrderProblem('An existing TikTok product editor is open. Finish it before opening a new listing.')
+                # Observed in the signed-in UK Seller Center, 2026-10-27.
+                self.driver.get(ORIGIN+'/product/create?channel=manage&shop_region=GB')
+            self.check_login()
+            self.wait(lambda:any(element.is_displayed() for element in self.driver.find_elements('xpath',"//*[normalize-space(.)='Add product']")))
+            self.guard()
+            return {'page':'listing','ready':True}
 
     def navigate(self,url,refresh=False):
         """Retry only read-only page loads; never restart or replace the session."""
         from selenium.common.exceptions import WebDriverException, TimeoutException
         if urlparse(url).hostname!='seller-uk.tiktok.com':
             raise OrderProblem('Unsupported TikTok page destination')
+        if urlparse(url).path.startswith(('/order','/homepage')):
+            self.select_order_window()
         for attempt in range(3):
             try:
                 if refresh: self.driver.refresh()
@@ -142,6 +190,7 @@ class TikTokBrowser:
     def refresh_idle(self):
         with self.lock:
             if not self.driver: return False
+            self.select_order_window()
             self.check_login()
             url=self.driver.current_url
             if urlparse(url).hostname!='seller-uk.tiktok.com':

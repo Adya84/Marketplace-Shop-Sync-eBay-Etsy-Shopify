@@ -6,6 +6,38 @@ from fastapi.testclient import TestClient
 from app.order_web import mount_orders
 from app.security import SecretBox
 
+
+def test_cancelled_browser_transfer_holds_the_shared_lock_until_worker_finishes(tmp_path,monkeypatch):
+    import asyncio
+    import threading
+    import app.order_web as web
+    import app.tiktok_listing_form as form
+    from fastapi import HTTPException
+    started=threading.Event(); finish=threading.Event()
+    async def desktop(): return True
+    def transfer(*args):
+        started.set()
+        assert finish.wait(3)
+        return {'state':'needs_review'}
+    monkeypatch.setattr(web,'desktop_ready',desktop)
+    monkeypatch.setattr(form,'transfer_listing',transfer)
+    core=SimpleNamespace(settings=SimpleNamespace(data_dir=tmp_path),secrets=SecretBox.from_file(tmp_path/'key'))
+    app=FastAPI(); mount_orders(app,core,lambda _:None)
+    async def scenario():
+        task=asyncio.create_task(app.state.tiktok_fill_listing_browser({},tmp_path))
+        assert await asyncio.to_thread(started.wait,3)
+        task.cancel()
+        await asyncio.sleep(0)
+        try:
+            assert app.state.tiktok_browser_lock.locked()
+            with pytest.raises(HTTPException) as error:
+                await app.state.tiktok_fill_listing_browser({},tmp_path)
+            assert error.value.status_code==409
+        finally: finish.set()
+        with pytest.raises(asyncio.CancelledError): await task
+        assert not app.state.tiktok_browser_lock.locked()
+    asyncio.run(scenario())
+
 @pytest.mark.parametrize('signed_out',[False,True])
 def test_empty_queue_verifies_preview_but_signout_pauses_without_writes(tmp_path,monkeypatch,signed_out):
     import threading

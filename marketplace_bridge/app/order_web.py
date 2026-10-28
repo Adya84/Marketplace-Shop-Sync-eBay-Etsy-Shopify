@@ -19,6 +19,7 @@ from .order_models import SourceOrder, OrderProblem, SignInRequired
 from .order_store import OrderStore
 from .order_shopify import OrderShopify
 from .order_sync import OrderSync
+from .workspace_navigation import workspace_navigation
 
 
 async def desktop_ready(port=5900):
@@ -61,6 +62,12 @@ def mount_orders(app,core,client_factory):
     csrf=secrets.token_urlsafe(32)
     instance=secrets.token_hex(16) # Public restart marker, never an authentication token.
     run_lock=asyncio.Lock()
+    app.state.tiktok_browser=browser
+    app.state.tiktok_browser_lock=run_lock
+    def browser_view_url(base):
+        socket=base+'/orders/desktop/websockify?token='+csrf
+        return base+'/orders/desktop/vnc.html?autoconnect=true&reconnect=true&reconnect_delay=3000&resize=scale&path='+quote(socket,safe='')
+    app.state.tiktok_browser_view_url=browser_view_url
     last_completed=None
     tasks=set()
     previous=app.router.lifespan_context
@@ -199,7 +206,7 @@ def mount_orders(app,core,client_factory):
         values={k:esc(str(config[k])) for k in ('shop_id','shop_name','target_shop')}
         return HTMLResponse('''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>TikTok order imports</title><style>body{font:16px system-ui;background:#f3f5fa;color:#18213b;margin:24px}main{max-width:1400px;margin:auto}section{background:white;padding:24px;margin:16px 0;border-radius:16px}input,textarea,button{font:inherit;padding:10px;margin:5px}label{display:block}textarea{width:95%;height:80px}button{cursor:pointer;background:#253e80;color:white;border:0;border-radius:7px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:left;padding:12px;border-bottom:1px solid #ddd;vertical-align:top}iframe{width:100%;height:720px;border:0}.scroll{overflow:auto}#status{white-space:pre-wrap}</style></head><body><main>
-        <a href="'''+esc(base)+'''/">← Shop Sync</a><h1>TikTok orders → Shopify</h1>
+        '''+workspace_navigation('orders',base)+'''<h1>TikTok orders → Shopify</h1>
         <p>Order-only beta. Paid, seller-fulfilled orders become physical Shopify orders for postage labels. No catalogue matching.</p>
         <section><h2>Connection and controls</h2><p id="status">'''+esc(config['last_message'])+'''</p><p id="last-success">Last completed scan: not recorded yet.</p>
         <p>Connected Shopify: <strong>'''+esc(domain or 'Not connected')+'''</strong>. Tracking return is manual in this beta.</p>
@@ -274,6 +281,32 @@ def mount_orders(app,core,client_factory):
             except Exception:
                 store.configure(last_message='Browser unavailable. Check supported host architecture and Chromium sandbox support.')
         schedule(start()); return {'started':True}
+
+    async def open_listing_browser():
+        if run_lock.locked(): raise HTTPException(409,'An order scan is running. Wait for it to finish before opening the listing browser.')
+        async with run_lock:
+            if not await desktop_ready(): raise HTTPException(503,'The TikTok browser display is unavailable on this host.')
+            try: return await asyncio.to_thread(browser.open_listing_editor)
+            except OrderProblem as exc: raise HTTPException(400,str(exc))
+            except Exception: raise HTTPException(503,'The TikTok listing browser could not be opened. Check the browser session and try again.')
+    app.state.tiktok_open_listing_browser=open_listing_browser
+
+    async def fill_listing_browser(listing,photos):
+        from .tiktok_listing_form import transfer_listing
+        if run_lock.locked(): raise HTTPException(409,'The TikTok browser is busy with an order scan or another listing. Try again when it finishes.')
+        async with run_lock:
+            if not await desktop_ready(): raise HTTPException(503,'The TikTok browser display is unavailable on this host.')
+            work=asyncio.create_task(asyncio.to_thread(transfer_listing,browser,listing,photos))
+            try:
+                # Cancelling a request does not stop Selenium's worker thread.
+                # Keep the browser lock until the worker actually finishes.
+                try: return await asyncio.shield(work)
+                except asyncio.CancelledError:
+                    try: await work
+                    finally: raise
+            except (ValueError,OrderProblem) as exc: raise HTTPException(400,str(exc))
+            except Exception: raise HTTPException(503,'TikTok transfer stopped. Review the browser form before trying again. Shop Sync has not submitted it.')
+    app.state.tiktok_fill_listing_browser=fill_listing_browser
 
     @app.get('/orders/desktop/{path:path}')
     async def desktop(path:str):

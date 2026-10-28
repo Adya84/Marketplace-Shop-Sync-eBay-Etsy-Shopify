@@ -1,0 +1,32 @@
+import pytest
+from app.workspace_navigation import workspace_navigation
+from app.tests.test_listing_web import client_for
+
+
+def test_navigation_links_stay_inside_home_assistant_ingress():
+    nav=workspace_navigation('listings','/api/hassio_ingress/example-token')
+    assert 'href="/api/hassio_ingress/example-token/listing-tool" aria-current="page"' in nav
+    assert '>Listing tool</a>' in nav
+    assert 'href="/api/hassio_ingress/example-token/orders"' in nav
+    assert 'href="/api/hassio_ingress/example-token/"' in nav
+    assert 'target="_blank"' not in nav
+    with pytest.raises(ValueError): workspace_navigation('listings','https://example.com')
+
+
+def test_listings_is_its_own_page_with_internal_navigation(tmp_path,monkeypatch):
+    client,headers,store=client_for(tmp_path,monkeypatch)
+    page=client.get('/listings',headers={'x-ingress-path':'/api/hassio_ingress/demo'}).text
+    assert 'aria-label="Shop Sync pages"' in page
+    assert 'href="/api/hassio_ingress/demo/orders"' in page
+    assert 'href="/api/hassio_ingress/demo/listing-tool" aria-current="page"' in page
+    assert 'Publish to all' in page and 'One listing, every shop.' in page
+    assert 'Import TikTok orders now' not in page
+
+
+def test_listing_tool_alias_and_browser_control_are_ingress_protected(tmp_path,monkeypatch):
+    client,headers,store=client_for(tmp_path,monkeypatch)
+    assert client.get('/listing-tool').status_code==200
+    assert client.post('/listings/api/tiktok/browser/open').status_code==403
+    result=client.post('/listings/api/tiktok/browser/open',headers=headers)
+    assert result.status_code==503
+    assert 'installed Shop Sync' in result.text
