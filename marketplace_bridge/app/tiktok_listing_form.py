@@ -42,14 +42,23 @@ def prepare_plan(listing,photos):
             'photos':paths}
 
 
+def _at_stage(stage,action,*args):
+    from .order_models import OrderProblem
+    try: return action(*args)
+    except (ValueError,OrderProblem): raise
+    except Exception as exc:
+        from .order_browser import browser_failure
+        raise ValueError('TikTok transfer stopped during '+stage+' ('+browser_failure(exc)+'). Review the unsaved browser form before retrying.') from None
+
+
 def fill_form(form,plan):
-    form.assert_blank(plan)
-    form.category(plan['category'])
-    if plan['brand']: form.brand(plan['brand'])
+    _at_stage('unfinished-form check',form.assert_blank,plan)
+    _at_stage('category selection',form.category,plan['category'])
+    if plan['brand']: _at_stage('brand selection',form.brand,plan['brand'])
     for name in ('title','description','stock','price','sku','weight_g','height_cm','width_cm','length_cm'):
-        if plan[name]!='' or name=='weight_g': form.set_field(name,plan[name])
-    form.upload(plan['photos'])
-    form.verify(plan)
+        if plan[name]!='' or name=='weight_g': _at_stage(name.replace('_',' '),form.set_field,name,plan[name])
+    _at_stage('photo upload',form.upload,plan['photos'])
+    _at_stage('field verification',form.verify,plan)
     return {'state':'needs_review','message':'Details and photos transferred to TikTok. Review parcel measurements, brand, attributes and compliance in the browser before submitting. This has not been published.'}
 
 
@@ -190,5 +199,5 @@ def transfer_listing(browser,listing,photos):
     # All validation is completed before opening or changing a browser form.
     plan=prepare_plan(listing,photos)
     with browser.lock:
-        browser.open_listing_editor()
+        _at_stage('opening product editor',browser.open_listing_editor)
         return fill_form(SeleniumListingForm(browser),plan)
