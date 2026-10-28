@@ -82,6 +82,15 @@ def test_failed_field_verification_cannot_report_prepared(tmp_path):
     with pytest.raises(ValueError,match='retain'): fill_form(ChangedForm(),prepare_plan(product(tmp_path),tmp_path))
 
 
+def test_browser_failures_identify_the_stage_without_exposing_driver_details(tmp_path):
+    from selenium.common.exceptions import TimeoutException
+    class SlowForm(Form):
+        def category(self,value): raise TimeoutException('secret driver URL or page contents')
+    with pytest.raises(ValueError) as error: fill_form(SlowForm(),prepare_plan(product(tmp_path),tmp_path))
+    assert 'category' in str(error.value) and 'TimeoutException' in str(error.value)
+    assert 'secret' not in str(error.value)
+
+
 def test_fractional_pennies_are_rejected_instead_of_changing_the_price(tmp_path):
     listing=product(tmp_path); listing['variants'][0]['price']='18.555'
     with pytest.raises(ValueError,match='decimal'): prepare_plan(listing,tmp_path)
