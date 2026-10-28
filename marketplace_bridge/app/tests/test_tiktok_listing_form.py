@@ -22,6 +22,15 @@ def test_transfer_converts_explicit_weight_and_uses_saved_photos(tmp_path):
     assert listing['settings']['weight_kg']=='1.225'
 
 
+def test_unsaved_transfer_clears_tiktok_suggested_weight_when_packed_weight_is_unknown(tmp_path):
+    listing=product(tmp_path); listing['settings'].pop('weight_kg')
+    plan=prepare_plan(listing,tmp_path); form=Form()
+    assert plan['weight_g']==''
+    result=fill_form(form,plan)
+    assert ('weight_g','') in form.changes
+    assert result['state']=='needs_review' and 'parcel' in result['message']
+
+
 @pytest.mark.parametrize('key,value,expected',[
     ('weight_kg','NaN','weight'),('weight_kg','0','weight'),
     ('weight_kg','101','weight'),('length_cm','-1','length'),
@@ -91,10 +100,11 @@ def test_tiktok_control_stock_limit_is_checked_before_browser_access(tmp_path):
     with pytest.raises(ValueError,match='999999'): prepare_plan(listing,tmp_path)
 
 
-@pytest.mark.parametrize('field,existing',[('weight_g','900'),('height_cm','9'),('width_cm','99'),('length_cm','40')])
+@pytest.mark.parametrize('field,existing',[('weight_g','900'),('weight_g','1225'),('height_cm','9'),('width_cm','99'),('length_cm','40')])
 def test_existing_parcel_details_cannot_be_overwritten(tmp_path,field,existing):
     from types import SimpleNamespace
     plan=prepare_plan(product(tmp_path),tmp_path)
+    if field=='weight_g' and existing=='1225': plan['weight_g']=''
     browser=SimpleNamespace(driver=SimpleNamespace(find_elements=lambda *args:[]),guard=lambda:None)
     form=SeleniumListingForm(browser)
     values={key:'' for key in form.fields}; values[field]=existing

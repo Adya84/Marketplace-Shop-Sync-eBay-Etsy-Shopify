@@ -37,7 +37,7 @@ def prepare_plan(listing,photos):
     return {'title':listing['title'],'description':listing['description'],
             'stock':str(variant['quantity']),'price':format(Decimal(str(variant['price'])),'.2f'),
             'sku':variant['sku'],'category':category,'brand':str(settings.get('brand') or '').strip(),
-            'weight_g':amount('weight_kg',100000,1000),
+            'weight_g':amount('weight_kg',100000,1000,required=False),
             **{key:amount(key,1000,required=False) for key in ('height_cm','width_cm','length_cm')},
             'photos':paths}
 
@@ -47,10 +47,10 @@ def fill_form(form,plan):
     form.category(plan['category'])
     if plan['brand']: form.brand(plan['brand'])
     for name in ('title','description','stock','price','sku','weight_g','height_cm','width_cm','length_cm'):
-        if plan[name]!='': form.set_field(name,plan[name])
+        if plan[name]!='' or name=='weight_g': form.set_field(name,plan[name])
     form.upload(plan['photos'])
     form.verify(plan)
-    return {'state':'needs_review','message':'Details and photos transferred to TikTok. Review brand, attributes and compliance in the browser before submitting. This has not been published.'}
+    return {'state':'needs_review','message':'Details and photos transferred to TikTok. Review parcel measurements, brand, attributes and compliance in the browser before submitting. This has not been published.'}
 
 
 class SeleniumListingForm:
@@ -160,7 +160,9 @@ class SeleniumListingForm:
             if unit.text.strip()!='Grams (g)':
                 unit.click(); self.text_control('Grams (g)').click()
         element=self.field(name)
-        element.click(); element.send_keys(Keys.CONTROL,'a'); element.send_keys(value); element.send_keys(Keys.TAB)
+        element.click(); element.send_keys(Keys.CONTROL,'a'); element.send_keys(Keys.BACKSPACE)
+        if value: element.send_keys(value)
+        element.send_keys(Keys.TAB)
 
     def upload(self,paths):
         uploader=self.one('#preview-product-image input[type=file]',visible=False)
@@ -169,10 +171,11 @@ class SeleniumListingForm:
 
     def verify(self,plan):
         for name in self.fields:
-            if plan[name]=='': continue
+            if plan[name]=='' and name!='weight_g': continue
             actual=self.value(name).replace('\r\n','\n').strip()
             expected=plan[name].replace('\r\n','\n').strip()
-            if name in ('stock','price','weight_g','height_cm','width_cm','length_cm'):
+            if not expected: equal=not actual
+            elif name in ('stock','price','weight_g','height_cm','width_cm','length_cm'):
                 try: equal=Decimal(actual.replace(',',''))==Decimal(expected)
                 except InvalidOperation: equal=False
             else: equal=actual==expected

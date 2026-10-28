@@ -11,7 +11,7 @@ Set usual categories, policies, shipping profiles, processing profiles and Shopi
 The TikTok browser section also has **Fill TikTok form from this listing**.
 This transfers saved details/photos for a single-SKU GBP product into an unsaved
 form for review. Set the category path and actual packed weight in Shop defaults
-first; do not use TikTok's suggested category weight as a measurement. Existing
+when known; an unknown packed weight is cleared in the unsaved form for review, so TikTok's suggestion is not used as a measurement. Existing
 unfinished fields are protected. This action does not save or submit the TikTok
 product and is not yet live-acceptance tested. Variations and existing TikTok
 product updates remain blocked on this transfer path. See

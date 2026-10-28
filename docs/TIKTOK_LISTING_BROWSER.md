@@ -50,6 +50,13 @@ out-of-range stock/weight/dimensions, missing photos and existing remote product
 mappings. The browser adapter checks for unfinished product, sales, category,
 brand or parcel data before changing the form. Matching preselected category
 and parcel settings are allowed; different values must be reviewed or cleared.
+An unknown packed weight may be omitted for this unsaved transfer. In that case
+the adapter explicitly clears TikTok's suggested weight and verifies it stayed
+blank. A product's bare weight must not be substituted for a packed measurement.
+This clearing applies to suggestions introduced when the transfer selects a
+category in a fresh blank form. An already-open form with a nonempty weight
+requires manual checking/clearing first: its existing weight cannot reliably be
+distinguished from a value entered by the seller and will not be overwritten.
 The browser and order scan share a lock, held until Selenium's worker thread
 finishes even when cancellation occurs. Interrupted preparation requires browser
 review after restart and is never marked as published.
