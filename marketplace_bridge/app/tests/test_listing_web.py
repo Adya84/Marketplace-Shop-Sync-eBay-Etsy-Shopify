@@ -16,6 +16,49 @@ def client_for(tmp_path,monkeypatch):
     return client,{'x-listing-csrf':token},store
 
 
+def test_browser_transfer_needs_csrf_and_installed_browser(tmp_path,monkeypatch):
+    client,headers,store=client_for(tmp_path,monkeypatch)
+    saved=store.save({'title':'Board'})
+    path='/listings/api/drafts/'+saved['id']+'/tiktok/prepare'
+    assert client.post(path).status_code==403
+    assert client.post(path,headers=headers).status_code==503
+
+
+def test_browser_transfer_uses_saved_shop_override_without_reporting_publication(tmp_path,monkeypatch):
+    import time
+    from app.tests.test_tiktok_listing_form import product
+    client,headers,store=client_for(tmp_path,monkeypatch)
+    photos=tmp_path/'listing-photos'; value=product(photos)
+    settings=value.pop('settings'); value.pop('destination')
+    value['destinations']={'tiktok':{'enabled':True,'overrides':{'title':'Short board title'},'settings':settings}}
+    saved=store.save(value); captured=[]
+    async def transfer(listing,directory):
+        captured.append(listing)
+        return {'state':'needs_review','message':'Review in TikTok. Not published.'}
+    client.app.state.tiktok_fill_listing_browser=transfer
+    with client:
+        result=client.post('/listings/api/drafts/'+saved['id']+'/tiktok/prepare',headers=headers)
+        assert result.status_code==200 and result.json()['queued']
+        for _ in range(100):
+            state=client.get('/listings/api/drafts/'+saved['id']+'/results').json()
+            if not state['busy']: break
+            time.sleep(.01)
+        assert not state['busy']
+        assert state['results']['tiktok']['status']=='needs_review'
+        assert not state['results']['tiktok'].get('mapping',{}).get('id')
+    assert captured[0]['title']=='Short board title'
+    assert captured[0]['revision']==saved['revision']
+
+
+def test_existing_remote_tiktok_product_cannot_be_transferred_as_a_new_product(tmp_path,monkeypatch):
+    client,headers,store=client_for(tmp_path,monkeypatch)
+    saved=store.save({'title':'Board'})
+    store.result(saved['id'],'tiktok',status='success',mapping={'id':'12345'})
+    async def transfer(*args): raise AssertionError('Existing products must not create a new form')
+    client.app.state.tiktok_fill_listing_browser=transfer
+    assert client.post('/listings/api/drafts/'+saved['id']+'/tiktok/prepare',headers=headers).status_code==409
+
+
 def test_drafts_require_csrf_and_do_not_publish(tmp_path,monkeypatch):
     client,headers,store=client_for(tmp_path,monkeypatch)
     assert client.post('/listings/api/drafts',json={'title':'Mug'}).status_code==403

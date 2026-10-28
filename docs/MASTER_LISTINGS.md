@@ -2,11 +2,20 @@
 
 Select **Listing tool** in the Shop Sync navigation to open its own page inside the app. **Dashboard**, **Listing tool** and **Order imports** have separate pages with links between them. Enter the title, description, photos, tags, price, stock and SKU once. Add size/colour options to generate editable variation rows. Select the destinations; optional adjustments change a shop's title, description, tags or price without changing the master.
 
-Set usual categories, policies, shipping profiles, processing profiles and Shopify channel under **Shop defaults**. These are reused by later listings. Individual listings may override them. Load shop choices instead of typing account IDs when the API provides those choices. eBay currently takes a category ID; **Load required product details** loads the category's aspects. TikTok settings use a browser category path and brand name rather than API category and warehouse identifiers. The page includes an **Open TikTok listing browser** button. It opens a dedicated product tab in the existing signed-in browser; order navigation and idle refresh use their own tab. Automatic form filling and submission are still pending.
+Set usual categories, policies, shipping profiles, processing profiles and Shopify channel under **Shop defaults**. These are reused by later listings. Individual listings may override them. Load shop choices instead of typing account IDs when the API provides those choices. eBay currently takes a category ID; **Load required product details** loads the category's aspects. TikTok settings use a browser category path and brand name rather than API category and warehouse identifiers. The page includes an **Open TikTok listing browser** button. It opens a dedicated product tab in the existing signed-in browser; order navigation and idle refresh use their own tab. Single-SKU form transfer is implemented and awaiting live acceptance; automatic submission is still pending.
 
 **Save draft** is local only. **Check shops** checks the shared data and required shop settings. **Publish to all** sends the saved listing to selected shops. Once remote IDs are known the button becomes **Update all**. Saving changes never automatically sends them. Each destination has its own durable result and mapping. Unchanged successful destinations are skipped on retry. Returned validation errors can be corrected and retried; an ambiguous network outcome requires checking the shop and linking the existing listing ID. Listing revisions are preserved when editing during an outstanding publish.
 
 ## Installation and live acceptance
+
+The TikTok browser section also has **Fill TikTok form from this listing**.
+This transfers saved details/photos for a single-SKU GBP product into an unsaved
+form for review. Set the category path and actual packed weight in Shop defaults
+first; do not use TikTok's suggested category weight as a measurement. Existing
+unfinished fields are protected. This action does not save or submit the TikTok
+product and is not yet live-acceptance tested. Variations and existing TikTok
+product updates remain blocked on this transfer path. See
+[browser integration status](TIKTOK_LISTING_BROWSER.md).
 
 This is source code for the Home Assistant add-on, not an already installed release. Merge/release and update the add-on through the existing deployment process. Back up persistent `/config` before acceptance testing. Existing catalogue, credentials and order tables are unchanged. New persistent files: `listings.db` and `listing-photos/`.
 
@@ -21,7 +30,7 @@ Before production release, use dedicated test products and seller approval to ve
 - eBay master listing publication is production-only; sandbox tokens are rejected before writes.
 - Etsy supports up to two variation options here. Three-option masters are blocked for Etsy rather than losing variants; automatic multi-listing splitting is not implemented by this editor.
 - Removing published eBay variation SKUs is blocked until they are reviewed/ended in eBay. Adding variations is supported and publishes the new offers.
-- TikTok submissions are shown as pending review, not live. Review webhooks and automatic final approval tracking are not included.
+- TikTok browser transfer returns needs_review for an unsaved form; it does not submit a product or report it live. Automatic submission, updates and approval tracking remain unfinished.
 - Certificate/size-chart uploads, digital downloads, listing video, per-variant photo selection and automatic stock synchronization are outside this version. Categories that require unsupported assets need Seller Center setup before submission.
 - Etsy/Shopify shop currencies must match the master; this editor does not convert money.
 - An ambiguous create with no returned remote ID needs seller reconciliation; it is never blindly repeated.

@@ -38,8 +38,26 @@ brand, package weight, compliance declaration or product identifier.
 - Compliance controls include manufacturer, responsible person and safety warning.
 - Final actions are `Save as draft` and `Submit for review`.
 
-No product details or photos were submitted, and neither final action was used.
-The blank inspection form remains unsaved. Automatic filling, image completion,
-variant row mapping, submission result capture and existing-product updates
-still require implementation and live acceptance before TikTok is enabled in
-Publish to all. Unknown or ambiguous controls must block rather than guess.
+The Listing tool now has a separate **Fill TikTok form from this listing**
+action. It uses saved TikTok overrides/defaults and fills a single-SKU form,
+including photos, stock, price and explicit parcel measurements. Preparation
+returns `needs_review`, never a remote product ID or a publishing success. It
+does not use the save or submit buttons. The regular Publish to all path still
+blocks TikTok automatic publishing.
+
+Transfer preflight rejects variations, non-GBP prices, fractional pennies,
+out-of-range stock/weight/dimensions, missing photos and existing remote product
+mappings. The browser adapter checks for unfinished product, sales, category,
+brand or parcel data before changing the form. Matching preselected category
+and parcel settings are allowed; different values must be reviewed or cleared.
+The browser and order scan share a lock, held until Selenium's worker thread
+finishes even when cancellation occurs. Interrupted preparation requires browser
+review after restart and is never marked as published.
+
+Automated tests cover transfer planning, occupied-form guards, snapshot/override
+use, route protection and review outcomes. Live transfer acceptance has not yet
+been performed: no product details or photos were submitted during development,
+and neither final action was used. Image completion selectors, variant row
+mapping, submission result capture and existing-product updates still need live
+acceptance or implementation before TikTok is enabled in Publish to all.
+Unknown or ambiguous controls must block rather than guess.

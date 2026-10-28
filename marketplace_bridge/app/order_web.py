@@ -291,6 +291,23 @@ def mount_orders(app,core,client_factory):
             except Exception: raise HTTPException(503,'The TikTok listing browser could not be opened. Check the browser session and try again.')
     app.state.tiktok_open_listing_browser=open_listing_browser
 
+    async def fill_listing_browser(listing,photos):
+        from .tiktok_listing_form import transfer_listing
+        if run_lock.locked(): raise HTTPException(409,'The TikTok browser is busy with an order scan or another listing. Try again when it finishes.')
+        async with run_lock:
+            if not await desktop_ready(): raise HTTPException(503,'The TikTok browser display is unavailable on this host.')
+            work=asyncio.create_task(asyncio.to_thread(transfer_listing,browser,listing,photos))
+            try:
+                # Cancelling a request does not stop Selenium's worker thread.
+                # Keep the browser lock until the worker actually finishes.
+                try: return await asyncio.shield(work)
+                except asyncio.CancelledError:
+                    try: await work
+                    finally: raise
+            except (ValueError,OrderProblem) as exc: raise HTTPException(400,str(exc))
+            except Exception: raise HTTPException(503,'TikTok transfer stopped. Review the browser form before trying again. Shop Sync has not submitted it.')
+    app.state.tiktok_fill_listing_browser=fill_listing_browser
+
     @app.get('/orders/desktop/{path:path}')
     async def desktop(path:str):
         if '..' in path or path.startswith('/'): raise HTTPException(400)

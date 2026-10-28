@@ -9,7 +9,8 @@ from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse, Response
 from .listing_connections import Connections
 from .listing_store import ListingStore
-from .listings import ListingService, MARKETS
+from .listings import ListingService, MARKETS, effective_listing
+from .tiktok_listing_form import prepare_plan
 from .order_web import ingress_peer
 from .workspace_navigation import workspace_navigation
 
@@ -119,6 +120,39 @@ def mount_listings(app,core,shopify_factory):
         try: await connections.prepare()
         except Exception: pass
         return await service.validate(value)
+
+    @app.post('/listings/api/drafts/{identifier}/tiktok/prepare')
+    async def prepare_tiktok(identifier:str):
+        value=listing(identifier)
+        transfer=getattr(app.state,'tiktok_fill_listing_browser',None)
+        if transfer is None: raise HTTPException(503,'Use the installed Shop Sync TikTok browser to transfer this listing.')
+        previous=store.results(identifier).get('tiktok',{})
+        if previous.get('mapping',{}).get('id') or previous.get('status') in ('uncertain','sending'):
+            raise HTTPException(409,'This listing already has a TikTok submission or an unresolved result. Check the existing product instead of creating another.')
+        snapshot=effective_listing(value,'tiktok',store.defaults('tiktok'))
+        try:
+            prepare_plan(snapshot,photos)
+            owner=store.claim(identifier)
+        except ValueError as exc: raise HTTPException(400,str(exc))
+        store.result(identifier,'tiktok',status='preparing',revision=value['revision'],message='Transferring saved details to the TikTok browser. Not published.')
+        async def run():
+            try:
+                result=await transfer(snapshot,photos)
+                store.result(identifier,'tiktok',status='needs_review',message=result['message'])
+            except asyncio.CancelledError:
+                store.result(identifier,'tiktok',status='needs_review',message='Browser transfer was interrupted. Check the TikTok form before retrying. It has not been submitted by Shop Sync.')
+                raise
+            except (ValueError,HTTPException) as exc:
+                store.result(identifier,'tiktok',status='blocked',message=str(exc.detail) if isinstance(exc,HTTPException) else str(exc))
+            except Exception:
+                store.result(identifier,'tiktok',status='needs_review',message='Browser transfer stopped. Review the partially filled TikTok form before retrying. No automatic submission was attempted.')
+            finally: store.release(identifier,owner)
+        task=asyncio.create_task(run()); tasks.add(task)
+        def done(task):
+            tasks.discard(task)
+            if not task.cancelled(): task.exception()
+        task.add_done_callback(done)
+        return {'queued':True,'revision':value['revision'],'state':'preparing'}
 
     @app.post('/listings/api/drafts/{identifier}/publish')
     async def publish(identifier:str):

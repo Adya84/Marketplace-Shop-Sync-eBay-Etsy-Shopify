@@ -20,8 +20,11 @@ class ListingStore:
             # A prior process cannot finish an in-flight request after restart.
             for row in db.execute('SELECT listing_id,destination,payload FROM listing_results').fetchall():
                 value=json.loads(row['payload'])
-                if value.get('status')=='sending':
-                    value.update(status='uncertain', message='Shop Sync restarted while sending. Check the shop before retrying.')
+                if value.get('status') in ('sending','preparing'):
+                    if value['status']=='preparing':
+                        value.update(status='needs_review',message='Shop Sync restarted during browser transfer. Check the unsaved TikTok form before retrying. No automatic submission was attempted.')
+                    else:
+                        value.update(status='uncertain', message='Shop Sync restarted while sending. Check the shop before retrying.')
                     db.execute('UPDATE listing_results SET payload=? WHERE listing_id=? AND destination=?',
                                (json.dumps(value),row['listing_id'],row['destination']))
             db.execute('DELETE FROM listing_locks')

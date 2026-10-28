@@ -13,6 +13,18 @@ def sample():
             'destinations': {'etsy': {'enabled': True}, 'ebay': {'enabled': True}}}
 
 
+def test_restart_requires_review_of_an_interrupted_unsaved_browser_transfer(tmp_path):
+    path=tmp_path/'listings.db'; store=ListingStore(path)
+    saved=store.save(sample()); store.claim(saved['id'])
+    store.result(saved['id'],'tiktok',status='preparing',revision=saved['revision'])
+    restarted=ListingStore(path)
+    result=restarted.results(saved['id'])['tiktok']
+    assert result['status']=='needs_review'
+    assert 'browser' in result['message'].lower()
+    assert not result.get('mapping',{}).get('id')
+    assert restarted.claim(saved['id'])
+
+
 def test_draft_revision_and_overrides_are_persistent(tmp_path):
     store=ListingStore(tmp_path/'listings.db')
     data=sample(); data['destinations']['ebay']['overrides']={'price': '14.00'}
