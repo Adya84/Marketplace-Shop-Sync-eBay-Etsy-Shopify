@@ -1,5 +1,6 @@
 import asyncio
 from .order_models import OrderProblem, money
+from .order_shopify import verify_shipping_address
 
 
 class OrderSync:
@@ -34,6 +35,10 @@ class OrderSync:
                             not total_matches):
                         state='validation_review'
                         message='Reconciled Shopify order status or total differs from TikTok; verify before shipping'
+                if state=='linked':
+                    try: verify_shipping_address(existing.get('shippingAddress'),order.address)
+                    except OrderProblem as exc:
+                        state='validation_review'; message=str(exc)
                 if state=='linked' and previous and previous['state']=='tracking_uncertain':
                     state='tracking_uncertain'
                 self.store.record(order,state,message,existing['id'])
