@@ -1,3 +1,8 @@
+## 0.0.35-beta3
+
+- Preserve single-name TikTok recipients in Shopify's required surname field so their shipping addresses are saved.
+- Verify returned shipping addresses after order creation, and reject existing matches without a complete shipping address instead of marking them linked. Failed verification keeps duplicate protection in place and requires review.
+
 ## 0.0.35-beta1
 
 - Add a Shop Sync master listing editor with one shared photo upload, variants, shop defaults and optional marketplace adjustments.

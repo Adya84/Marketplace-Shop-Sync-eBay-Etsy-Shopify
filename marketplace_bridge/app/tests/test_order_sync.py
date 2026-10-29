@@ -13,7 +13,8 @@ class Shopify:
     async def create(self,order):
         self.created.append(order)
         self.existing={'id':'gid://shopify/Order/123','cancelledAt':None,'displayFinancialStatus':'PAID',
-                       'displayFulfillmentStatus':'UNFULFILLED','totalPriceSet':{'shopMoney':{'amount':order.total,'currencyCode':order.currency}}}
+                       'displayFulfillmentStatus':'UNFULFILLED','totalPriceSet':{'shopMoney':{'amount':order.total,'currencyCode':order.currency}},
+                       'shippingAddress':dict(firstName='Test',lastName='Buyer',address1='1 Example Road',city='Glasgow',zip='G52 3RZ',countryCodeV2='GB')}
         return self.existing
 
 
@@ -25,8 +26,25 @@ def setup(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_wrong_shipping_address_stays_in_review_on_repeated_reconciliation(setup):
+    db,api,sync=setup;order=sample()
+    db.record(order,'uncertain','Response lost')
+    api.existing={'id':'gid://shopify/Order/123','cancelledAt':None,
+        'displayFinancialStatus':'PAID','displayFulfillmentStatus':'UNFULFILLED',
+        'totalPriceSet':{'shopMoney':{'amount':'6.99','currencyCode':'GBP'}},
+        'shippingAddress':dict(firstName='Test',lastName='Buyer',address1='99 Wrong Road',
+            city='Glasgow',zip='G52 3RZ',countryCodeV2='GB')}
+    for _ in range(2):
+        await sync.import_order(order,writes=True)
+        row=db.get(order.shop_id,order.order_id)
+        assert row['state']=='validation_review' and 'shipping address' in row['message']
+        assert row['shopify_id']==api.existing['id'] and not api.created
+
+
+@pytest.mark.asyncio
 async def test_native_import_is_detected_and_not_duplicated(setup):
-    db,api,sync=setup; api.existing={'id':'gid://shopify/Order/1020','cancelledAt':None}
+    db,api,sync=setup; api.existing={'id':'gid://shopify/Order/1020','cancelledAt':None,
+        'shippingAddress':dict(firstName='Test',lastName='Buyer',address1='1 Example Road',city='Glasgow',zip='G52 3RZ',countryCodeV2='GB')}
     await sync.import_order(sample(),writes=True)
     assert api.created==[]
     assert db.get(sample().shop_id,sample().order_id)['shopify_id']==api.existing['id']

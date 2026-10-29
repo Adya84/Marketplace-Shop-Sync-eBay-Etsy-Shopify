@@ -4,13 +4,15 @@ from .order_models import OrderProblem, money
 
 FIND_ORDER = '''query BridgeFindOrder($query: String!) {
   orders(first: 10, query: $query) {
-    nodes { id tags cancelledAt displayFinancialStatus displayFulfillmentStatus totalPriceSet{shopMoney{amount currencyCode}} }
+    nodes { id tags cancelledAt displayFinancialStatus displayFulfillmentStatus totalPriceSet{shopMoney{amount currencyCode}}
+      shippingAddress{firstName lastName address1 address2 city zip countryCodeV2} }
     pageInfo { hasNextPage }
   }
 }'''
 CREATE_ORDER = '''mutation BridgeCreateOrder($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
   orderCreate(order: $order, options: $options) {
-    order { id name displayFinancialStatus displayFulfillmentStatus totalPriceSet{shopMoney{amount currencyCode}} }
+    order { id name displayFinancialStatus displayFulfillmentStatus totalPriceSet{shopMoney{amount currencyCode}}
+      shippingAddress{firstName lastName address1 address2 city zip countryCodeV2} }
     userErrors { field message }
   }
 }'''
@@ -27,6 +29,30 @@ CUSTOMER_CREATE='''mutation BridgeCustomerCreate($input:CustomerInput!){customer
  customer{id} userErrors{field message}}}'''
 
 
+def shipping_address(source):
+    address=dict(source.address)
+    # Shopify requires a surname even when TikTok supplies only one name.
+    # Move that exact name, rather than inventing or duplicating one.
+    if not str(address.get('lastName') or '').strip():
+        address['lastName']=str(address.get('firstName') or '').strip()
+        address['firstName']=''
+    return address
+
+
+def verify_shipping_address(address,expected=None):
+    if not address or any(not str(address.get(key) or '').strip()
+                          for key in ('address1','city','zip','countryCodeV2')) or not str(address.get('lastName') or '').strip():
+        raise OrderProblem('Shopify shipping address is missing or incomplete; review before shipping')
+    if expected:
+        def normal(value): return ' '.join(str(value or '').split()).casefold()
+        pairs=[(key,key) for key in ('address1','address2','city')]+[('countryCodeV2','countryCode')]
+        if (any(normal(address.get(left))!=normal(expected.get(right)) for left,right in pairs) or
+                normal(address.get('zip')).replace(' ','')!=normal(expected.get('zip')).replace(' ','') or
+                normal(' '.join(str(address.get(k) or '') for k in ('firstName','lastName')))!=
+                normal(' '.join(str(expected.get(k) or '') for k in ('firstName','lastName')))):
+            raise OrderProblem('Shopify shipping address differs from TikTok; review before shipping')
+
+
 def build_order(source):
     source.validate()
     if money(source.tax) != 0:
@@ -39,7 +65,7 @@ def build_order(source):
         'tags':[f'TikTokOrderID:{source.order_id}',f'TikTokShopID:{source.shop_id}','Shop Sync order import'],
         'note':f'Paid on TikTok Shop. Source order {source.order_id}. Do not collect payment again.'+
                ('\nDelivery instructions: '+source.delivery_instructions if source.delivery_instructions else ''),
-        'shippingAddress':source.address,'taxesIncluded':False,
+        'shippingAddress':shipping_address(source),'taxesIncluded':False,
         'lineItems':[{'title':item['title'],'variantTitle':item.get('variant',''),
                       'sku':item.get('sku',''),'quantity':item['quantity'],
                       'priceSet':price(item['unit_price']),'taxable':False,'requiresShipping':True,
@@ -71,6 +97,8 @@ class OrderShopify:
         matches=[x for x in connection['nodes'] if tag in x.get('tags',[])]
         if len(matches)>1 or connection['pageInfo']['hasNextPage']:
             raise OrderProblem('Multiple Shopify matches require review')
+        if matches:
+            verify_shipping_address(matches[0].get('shippingAddress'))
         return matches[0] if matches else None
 
     async def create(self,source):
@@ -103,6 +131,7 @@ class OrderShopify:
         total=order['totalPriceSet']['shopMoney']
         if total['currencyCode']!=source.currency or money(total['amount'])!=source.amount:
             raise OrderProblem('Shopify order total differs from TikTok; review order before shipping')
+        verify_shipping_address(order.get('shippingAddress'),payload['shippingAddress'])
         return order
 
     async def tracking(self,shopify_id):
