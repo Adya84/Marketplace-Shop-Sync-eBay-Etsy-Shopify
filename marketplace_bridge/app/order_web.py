@@ -20,6 +20,8 @@ from .order_store import OrderStore
 from .order_shopify import OrderShopify
 from .order_sync import OrderSync
 from .workspace_navigation import workspace_navigation
+from .order_feedback import next_scan_seconds, summarize_run
+from pathlib import Path
 
 
 async def desktop_ready(port=5900):
@@ -57,6 +59,10 @@ async def poll_orders(enabled,cycle,refresh,completed_at,sleep=asyncio.sleep,clo
 
 def mount_orders(app,core,client_factory):
     store=OrderStore(core.settings.data_dir/'orders.db',core.secrets)
+    interrupted=store.settings().get('latest_run')
+    if interrupted and interrupted.get('state')=='running':
+        interrupted.update(state='failed',completed_at=datetime.now(timezone.utc).isoformat(),message='Scan interrupted by a restart; imported orders will be reconciled on the next scan')
+        store.configure(latest_run=interrupted)
     browser=TikTokBrowser(core.settings.data_dir/'tiktok-browser',store.settings,
                          lambda message:store.configure(last_message=message))
     csrf=secrets.token_urlsafe(32)
@@ -77,6 +83,9 @@ def mount_orders(app,core,client_factory):
         if run_lock.locked(): return
         async with run_lock:
             stage='Shopify connection'
+            run={'started_at':datetime.now(timezone.utc).isoformat(),'state':'running','mode':'preview' if dry else 'import'}
+            states=[]; imported=0; writes=False
+            store.configure(latest_run=run,results_hidden=False)
             try:
                 store.configure(last_message='Checking Shopify connection…')
                 config=store.settings()
@@ -110,12 +119,17 @@ def mount_orders(app,core,client_factory):
                         payload=old['payload'] if old else dict(shop_id=config['shop_id'],order_id=order_id,
                             status='Unknown',currency='GBP',total='0.00',shipping='0.00',address={},items=[],seller_fulfilled=False)
                         failures+=1
+                        states.append('source_failed')
                         reason=str(exc) if isinstance(exc,OrderProblem) else type(exc).__name__
                         store.source_failure(SourceOrder(**payload),reason)
                         continue
                     # Never backfill already-dispatched historical orders.
                     if order.status!='Awaiting packing': continue
+                    before=store.get(order.shop_id,order_id)
                     await sync.import_order(order,writes=writes)
+                    after=store.get(order.shop_id,order_id)
+                    states.append(after['state'] if after else 'source_failed')
+                    if writes and after and after['state']=='linked' and not (before and before.get('shopify_id')) and after['message']=='Imported into Shopify': imported+=1
                     try:
                         order.validate()
                         if store.get(order.shop_id,order_id)['state'] in {'preview','linked'}: ready+=1
@@ -125,6 +139,8 @@ def mount_orders(app,core,client_factory):
                 # Detail failures remain durable review rows and never reach
                 # creation. They must not block independently validated orders.
                 if dry: store.configure(preview_verified=not ids or ready>0)
+                run.update(state='completed',completed_at=datetime.now(timezone.utc).isoformat(),counts=summarize_run(states,writes,imported))
+                store.configure(latest_run=run)
                 store.configure(last_success_at=datetime.now(timezone.utc).isoformat())
                 store.configure(last_message=f'Scan complete: {len(ids)} Awaiting packing orders inspected. '+
                                 ('Preview only.' if not writes else 'Import run finished.')+
@@ -138,7 +154,11 @@ def mount_orders(app,core,client_factory):
                 # information, request headers or session capabilities.
                 from .order_browser import browser_failure
                 store.configure(last_message=f'Scan stopped during {stage}: {browser_failure(exc)}.')
-            finally: last_completed=time.monotonic()
+            finally:
+                if run['state']=='running':
+                    run.update(state='failed',completed_at=datetime.now(timezone.utc).isoformat(),message=store.settings()['last_message'],counts=summarize_run(states,writes,imported))
+                    store.configure(latest_run=run)
+                last_completed=time.monotonic()
 
     def schedule(coro):
         task=asyncio.create_task(coro); tasks.add(task); task.add_done_callback(tasks.discard)
@@ -191,6 +211,7 @@ def mount_orders(app,core,client_factory):
         if base and not re.fullmatch(r'/[A-Za-z0-9_/-]+',base): raise HTTPException(400,'Invalid ingress path')
         rows=[]
         for row in store.list_orders():
+            if config.get('results_hidden'): continue
             active=config.get('active_packing_ids')
             if active is not None and (row['shop']!=config['shop_id'] or row['source_id'] not in active): continue
             payload=row['payload']; items=payload.get('items',[])
@@ -221,7 +242,7 @@ def mount_orders(app,core,client_factory):
         <section><h2>TikTok browser</h2><p>Sign in here on this Home Assistant host. Your browser session stays in the app’s private configuration.</p>
         <iframe title="TikTok sign in" src="'''+esc(base)+'''/orders/desktop/vnc.html?autoconnect=true&amp;reconnect=true&amp;reconnect_delay=3000&amp;resize=scale&amp;path='''+quote(base+'/orders/desktop/websockify?token='+csrf,safe='')+'''"></iframe></section>
         <section><h2>Import preview and review</h2><p>Unknown weights, masked addresses, discounts that do not reconcile, cancelled orders and multiple parcels need review. No labels are purchased automatically.</p><div class="scroll"><table><thead><tr><th>TikTok order</th><th>Status</th><th>Items</th><th>Delivery</th><th>GBP</th><th>Review</th><th>Tracking</th></tr></thead><tbody>'''+''.join(rows)+'''</tbody></table></div></section>
-        </main><script>const cfg='''+boot+''';let busy=false;async function status(){try{const r=await fetch(cfg.base+'/orders/status',{cache:'no-store'});if(!r.ok)return;const s=await r.json();if(s.instance!==cfg.instance){location.reload();return}document.getElementById('last-success').textContent='Last completed scan: '+(s.last_success_at?new Date(s.last_success_at).toLocaleString('en-GB',{timeZone:'Europe/London'}):'not recorded yet')+'.';document.getElementById('import-now').disabled=s.running;document.getElementById('status').textContent=(s.running?'Working… ':'')+s.message+' '+(s.automatic?'Automatic import is on (5 minute interval).':'Automatic import is off.')}catch(e){}}async function send(path,body){const r=await fetch(cfg.base+'/orders/'+path,{method:'POST',headers:{'content-type':'application/json','x-order-csrf':cfg.csrf},body:JSON.stringify(body||{})});const text=await r.text();if(!r.ok){let detail=text;try{detail=JSON.parse(text).detail||text}catch(e){}document.getElementById('action-status').textContent=detail;return false}await status();return true}async function act(path){if(busy)return;busy=true;document.getElementById('action-status').textContent='Sending request…';try{if(await send(path)){document.getElementById('action-status').textContent=path==='import'?'Import request accepted. Follow live progress above.':path==='scan'?'Preview request accepted. Follow live progress above.':'Browser start requested.';await status()}}catch(e){document.getElementById('action-status').textContent='Could not reach Shop Sync. Reload this page and try again.'}finally{busy=false}}async function save(){try{await send('settings',{shop_name:document.getElementById('shop_name').value,shop_id:document.getElementById('shop_id').value,target_shop:document.getElementById('target_shop').value,weights:JSON.parse(document.getElementById('weights').value),carriers:JSON.parse(document.getElementById('carriers').value),enabled:document.getElementById('enabled').checked});await status()}catch(e){document.getElementById('status').textContent='Check the JSON settings.'}}status();setInterval(status,3000)</script></body></html>''')
+        </main><script>const cfg='''+boot+''';'''+Path(__file__).with_name('order_feedback.js').read_text(encoding='utf-8')+'''</script></body></html>''')
 
     @app.post('/orders/settings')
     async def configure(request:Request):
@@ -246,8 +267,9 @@ def mount_orders(app,core,client_factory):
                 await OrderShopify(client_factory(core.get_credentials('shopify'))).check_scopes()
             except OrderProblem as exc:
                 raise HTTPException(400,str(exc)) from exc
-        store.configure(**value,preview_verified=old.get('preview_verified',False) and not changed)
-        return {'ok':True}
+        stamp=datetime.now(timezone.utc).isoformat()
+        store.configure(**value,settings_saved_at=stamp,preview_verified=old.get('preview_verified',False) and not changed)
+        return {'ok':True,'saved_at':stamp}
 
     @app.post('/orders/scan')
     async def scan():
@@ -267,7 +289,15 @@ def mount_orders(app,core,client_factory):
     async def order_status():
         config=store.settings()
         return {'message':config['last_message'],'running':run_lock.locked(),'automatic':config['enabled'],
-                'last_success_at':config.get('last_success_at'),'instance':instance}
+                'last_success_at':config.get('last_success_at'),'instance':instance,
+                'latest_run':config.get('latest_run'),'settings_saved_at':config.get('settings_saved_at'),
+                'results_hidden':config.get('results_hidden',False),
+                'next_scan_seconds':next_scan_seconds(config['enabled'],run_lock.locked(),last_completed,time.monotonic())}
+
+    @app.post('/orders/clear-results')
+    async def clear_results():
+        store.configure(results_hidden=True)
+        return {'ok':True}
 
     @app.post('/orders/browser/start')
     async def start_browser():
