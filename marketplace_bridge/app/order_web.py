@@ -225,7 +225,7 @@ def mount_orders(app,core,client_factory):
         except Exception: domain=''
         boot=json.dumps({'csrf':csrf,'base':base,'instance':instance},ensure_ascii=True).replace('<','\\u003c')
         values={k:esc(str(config[k])) for k in ('shop_id','shop_name','target_shop')}
-        return HTMLResponse('''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        return HTMLResponse('''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>TikTok order imports</title><style>body{font:16px system-ui;background:#f3f5fa;color:#18213b;margin:24px}main{max-width:1400px;margin:auto}section{background:white;padding:24px;margin:16px 0;border-radius:16px}input,textarea,button{font:inherit;padding:10px;margin:5px}label{display:block}textarea{width:95%;height:80px}button{cursor:pointer;background:#253e80;color:white;border:0;border-radius:7px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:left;padding:12px;border-bottom:1px solid #ddd;vertical-align:top}iframe{width:100%;height:720px;border:0}.scroll{overflow:auto}#status{white-space:pre-wrap}</style></head><body><main>
         '''+workspace_navigation('orders',base)+'''<h1>TikTok orders → Shopify</h1>
         <p>Order-only beta. Paid, seller-fulfilled orders become physical Shopify orders for postage labels. No catalogue matching.</p>

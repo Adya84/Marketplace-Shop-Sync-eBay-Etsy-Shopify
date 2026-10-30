@@ -1,3 +1,7 @@
+## 0.0.35-beta11
+
+- Declare UTF-8 inside the order page so status messages display correctly through Home Assistant Ingress.
+
 ## 0.0.35-beta10
 
 - Show saving, saved-at, unsaved-change and persistent error feedback for order settings.
