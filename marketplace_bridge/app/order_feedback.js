@@ -40,8 +40,9 @@ async function status(){try{
  }
  const key=JSON.stringify([run?.completed_at,s.results_hidden]);
  if(key!==lastResult&&!s.running){await refreshResults();lastResult=key}
+ if(byId('action-status').dataset.connectionError==='true')byId('action-status').textContent='Connection restored.';
  byId('action-status').dataset.connectionError='';
- }catch(e){byId('action-status').textContent='Could not read Shop Sync status. Connection lost; scan progress is unverified.';deadline=null;countdown.dataset.state='Next scan time unavailable';tick()}
+ }catch(e){byId('action-status').dataset.connectionError='true';byId('action-status').textContent='Could not read Shop Sync status. Connection lost; scan progress is unverified.';deadline=null;countdown.dataset.state='Next scan time unavailable';tick()}
 }
 function tick(){if(deadline===null){countdown.textContent=countdown.dataset.state||'Next scan time unavailable';return}const n=Math.max(0,Math.ceil((deadline-Date.now())/1000));countdown.textContent=n?'Next scan in '+Math.floor(n/60)+':'+String(n%60).padStart(2,'0'):'Next scan due — waiting to start'}
 async function act(path){if(busy)return;busy=true;byId('action-status').textContent='Sending request…';try{await send(path);byId('action-status').textContent=path==='import'?'Import request accepted.':path==='scan'?'Preview request accepted.':'Browser start requested.';await status()}catch(e){byId('action-status').textContent=e.message}finally{busy=false}}

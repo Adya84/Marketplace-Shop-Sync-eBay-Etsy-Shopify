@@ -1,3 +1,10 @@
+## 0.0.35-beta10
+
+- Show saving, saved-at, unsaved-change and persistent error feedback for order settings.
+- Keep scan completion/failure times and outcome counts visible, with a countdown to the actual next automatic scan.
+- Refresh result details automatically and allow clearing the display without deleting import records or duplicate protection.
+- Report interrupted scans and browser-status connection recovery clearly.
+
 ## 0.0.35-beta3
 
 - Preserve single-name TikTok recipients in Shopify's required surname field so their shipping addresses are saved.
