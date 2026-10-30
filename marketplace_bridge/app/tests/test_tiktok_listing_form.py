@@ -128,6 +128,22 @@ def test_upload_confirmation_reads_current_image_sources_atomically():
     assert len(calls)==1
 
 
+def test_description_verification_uses_paragraph_text_not_visual_margins():
+    from types import SimpleNamespace
+    text='Teacher gift 🎄'+chr(10)+chr(10)+'Personalised board'
+    element=SimpleNamespace(text=text.replace(chr(10),chr(10)*2))
+    browser=SimpleNamespace(driver=SimpleNamespace(execute_script=lambda script,node:text))
+    form=SeleniumListingForm(browser); form.field=lambda name:element
+    assert form.value('description')==text
+
+
+def test_description_verification_rejects_unexpected_editor_structure():
+    from types import SimpleNamespace
+    browser=SimpleNamespace(driver=SimpleNamespace(execute_script=lambda *args:None))
+    form=SeleniumListingForm(browser); form.field=lambda name:SimpleNamespace(text='unexpected')
+    with pytest.raises(ValueError,match='description'): form.value('description')
+
+
 def test_fractional_pennies_are_rejected_instead_of_changing_the_price(tmp_path):
     listing=product(tmp_path); listing['variants'][0]['price']='18.555'
     with pytest.raises(ValueError,match='decimal'): prepare_plan(listing,tmp_path)
