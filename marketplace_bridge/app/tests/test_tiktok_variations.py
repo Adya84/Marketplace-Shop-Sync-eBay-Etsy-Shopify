@@ -200,7 +200,40 @@ def test_custom_axis_matching_final_action_never_clicks_the_page_button(name):
         assert text=='Add new'
         return addnew
     form.text_control=page_text
+    form.click_control=lambda element:element.click()
     form.insert_text=lambda element,text:entered.append(text)
     form.choose_variation_name(wrapper,name)
     assert 'FORBIDDEN final action' not in clicks
     assert entered==[name] and clicks==['picker','Add new','Add']
+
+
+@pytest.mark.parametrize('already_visible',[True,False])
+def test_native_click_waits_until_target_is_uncovered_without_bypassing_overlays(already_visible):
+    from types import SimpleNamespace
+    from app.tiktok_listing_form import SeleniumListingForm
+    visible=already_visible; actions=[]
+    def script(code,element):
+        nonlocal visible
+        if 'scrollIntoView' in code: visible=True; actions.append('scroll')
+        else: return visible
+    def click():
+        assert visible,'Sticky header still covers the control'
+        actions.append('native click')
+    browser=SimpleNamespace(driver=SimpleNamespace(execute_script=script),wait=lambda fn:fn())
+    form=SeleniumListingForm(browser)
+    form.click_control(SimpleNamespace(click=click))
+    assert actions==(['native click'] if already_visible else ['scroll','native click'])
+
+
+def test_persistent_overlay_stops_before_any_native_click():
+    from types import SimpleNamespace
+    from selenium.common.exceptions import TimeoutException
+    from app.tiktok_listing_form import SeleniumListingForm
+    clicks=[]
+    def wait(fn):
+        assert fn() is False
+        raise TimeoutException('Target remains covered')
+    browser=SimpleNamespace(driver=SimpleNamespace(execute_script=lambda *a:False),wait=wait)
+    form=SeleniumListingForm(browser)
+    with pytest.raises(TimeoutException): form.click_control(SimpleNamespace(click=lambda:clicks.append(1)))
+    assert clicks==[]

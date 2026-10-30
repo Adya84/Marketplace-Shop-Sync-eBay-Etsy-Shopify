@@ -260,9 +260,18 @@ class SeleniumListingForm:
 
     def insert_text(self,element,value):
         from selenium.webdriver.common.keys import Keys
-        element.click(); element.send_keys(Keys.CONTROL,'a'); element.send_keys(Keys.BACKSPACE)
+        self.click_control(element); element.send_keys(Keys.CONTROL,'a'); element.send_keys(Keys.BACKSPACE)
         if value: self.driver.execute_cdp_cmd('Input.insertText',{'text':value})
         element.send_keys(Keys.TAB)
+
+    def click_control(self,element):
+        hit=r'''const e=arguments[0],r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+            if(!e.isConnected||r.width<=0||r.height<=0||x<0||y<0||x>=innerWidth||y>=innerHeight)return false;
+            const top=document.elementFromPoint(x,y);return !!top&&(top===e||e.contains(top));'''
+        if not self.driver.execute_script(hit,element):
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center',inline:'nearest'});",element)
+            self.browser.wait(lambda:self.driver.execute_script(hit,element))
+        element.click()
 
     def variation_group(self,index):
         self.browser.guard()
@@ -279,7 +288,7 @@ class SeleniumListingForm:
         return decode_rows(self.driver.execute_script(TABLE_DOM),[axis['name'] for axis in plan['axes']])
 
     def choose_variation_name(self,wrapper,name):
-        wrapper.click()
+        self.click_control(wrapper)
         # Fixed picker action identifies the open popup. User text must never
         # be resolved through a page-wide selector (it may name Submit/Save).
         addnew=self.text_control('Add new')
@@ -287,14 +296,14 @@ class SeleniumListingForm:
         options=[e for e in popup.find_elements('css selector','[role=menuitem], [role=option]') if e.is_displayed() and e.text.strip()==name]
         if len(options)>1: raise ValueError('TikTok variation name is ambiguous. Review the browser form.')
         if options:
-            options[0].click(); return
-        addnew.click()
+            self.click_control(options[0]); return
+        self.click_control(addnew)
         entries=[e for e in popup.find_elements('css selector','input') if e.is_displayed() and e.get_attribute('aria-hidden')!='true']
         if len(entries)!=1: raise ValueError('TikTok custom variation name is ambiguous. Review the browser form.')
         self.insert_text(entries[0],name)
         adds=[e for e in popup.find_elements('xpath',".//*[normalize-space(.)='Add' and not(.//*[normalize-space(.)='Add'])]") if e.is_displayed()]
         if len(adds)!=1: raise ValueError('TikTok custom variation Add action is ambiguous. Review the browser form.')
-        adds[0].click()
+        self.click_control(adds[0])
 
     def set_variation_field(self,plan,expected,name):
         from .tiktok_listing_variations import TABLE_DOM, decode_rows, match_rows
@@ -327,11 +336,11 @@ class SeleniumListingForm:
         switch=self.one('[data-id="product.publish.variation.switch"] [role=switch]')
         if switch.get_attribute('aria-checked')!='false':
             raise ValueError('An unfinished TikTok variation editor is open. Review it before transferring.')
-        switch.click()
+        self.click_control(switch)
         self.browser.wait(lambda:bool(self.driver.find_elements('css selector','[data-id^="product.publish.sale_property.name."]')))
         for index,axis in enumerate(plan['axes']):
             if index:
-                self.text_control('Add variation').click()
+                self.click_control(self.text_control('Add variation'))
                 self.browser.wait(lambda:len(self.driver.find_elements('css selector','[data-id^="product.publish.sale_property.name."]'))==index+1)
             wrapper,group=self.variation_group(index)
             self.choose_variation_name(wrapper,axis['name'])
@@ -341,7 +350,7 @@ class SeleniumListingForm:
                     _,group=self.variation_group(index)
                     add_options=[e for e in group.find_elements('xpath',".//*[normalize-space(.)='Add option' and not(.//*[normalize-space(.)='Add option'])]") if e.is_displayed()]
                     if len(add_options)!=1: raise ValueError('TikTok option control is ambiguous. Review the browser form.')
-                    add_options[0].click()
+                    self.click_control(add_options[0])
                 _,group=self.variation_group(index)
                 inputs=[e for e in group.find_elements('css selector','input[data-id^="product.publish.sale_property.value.name."]') if e.is_displayed()]
                 if len(inputs)!=option_index+1: raise ValueError('TikTok variation option count changed. Review the browser form.')
