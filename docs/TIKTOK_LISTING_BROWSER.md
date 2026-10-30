@@ -68,3 +68,28 @@ and neither final action was used. Image completion selectors, variant row
 mapping, submission result capture and existing-product updates still need live
 acceptance or implementation before TikTok is enabled in Publish to all.
 Unknown or ambiguous controls must block rather than guess.
+
+## Verified baseline and variation continuation — 2026-10-30
+
+Installed version 0.0.35-beta7 passed an unsaved single-SKU Teacher-board transfer,
+including the original description with emoji, category, price, stock, SKU and
+photo. No remote Save as draft or Submit for review was used. Earlier statements
+that live acceptance had not happened describe the initial beta1.
+
+The variation extension supports one to three option axes and at most 100 SKU
+rows. Every combination must exist in the saved listing; sparse matrices are
+blocked instead of creating extra SKUs. Source option labels, SKU, stock and
+prices are preserved. Generated table rows are matched by exact option values,
+including HTML row spans, and read again before each field is entered. Missing,
+extra, duplicate or unexpected table rows stop the transfer. Submission and
+updates of existing TikTok products remain unfinished.
+
+Observed name wrappers use dynamic data-id prefix
+product.publish.sale_property.name.; values use
+product.publish.sale_property.value.name. Select an existing name, or use Add new,
+the new-name input and Add. Typing an unknown name into the main picker and
+blurring clears it. Add option exposes Add another value, which changes to Enter
+an option after entry. Table columns start with the option names, then Stock,
+Retail price, Seller SKU, Product identifier code and an action column. Earlier
+axes group combinations with rowSpan. SKU inputs use dynamic id prefix skus.
+Never hardcode generated suffixes.
