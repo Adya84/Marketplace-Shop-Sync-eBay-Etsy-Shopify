@@ -127,8 +127,11 @@ class SeleniumListingForm:
         return element.text if name=='description' else element.get_attribute('value') or ''
 
     def image_sources(self):
-        return {e.get_attribute('src') for e in self.driver.find_elements('css selector','#preview-product-image img')
-                if e.get_attribute('src') and 'image-upload-placeholder-' not in e.get_attribute('src')}
+        sources=self.driver.execute_script('''return Array.from(document.querySelectorAll('#preview-product-image img'))
+            .map(e=>e.currentSrc||e.src).filter(s=>s&&!s.includes('image-upload-placeholder-'));''')
+        if not isinstance(sources,list) or any(not isinstance(source,str) for source in sources):
+            raise ValueError('TikTok photos could not be read safely. Review the browser form.')
+        return set(sources)
 
     def assert_blank(self,plan):
         _at_stage('shop identity verification',self.browser.guard)
