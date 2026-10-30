@@ -203,12 +203,14 @@ class TikTokBrowser:
         with self.lock:
             if self.driver:
                 from selenium.common.exceptions import WebDriverException
-                from urllib3.exceptions import MaxRetryError, NewConnectionError, ReadTimeoutError
-                connection_errors=(WebDriverException,MaxRetryError,NewConnectionError,ReadTimeoutError)
+                from urllib3.exceptions import MaxRetryError, NewConnectionError, ReadTimeoutError, ProtocolError
+                connection_errors=(WebDriverException,MaxRetryError,NewConnectionError,ReadTimeoutError,ProtocolError)
                 try:
                     self.driver.execute_script('return 1')
                     return
                 except connection_errors:
+                    if self.listing_window is not None:
+                        raise OrderProblem('Browser connection stopped with an open listing. Review the unsaved form before restarting Shop Sync.') from None
                     self.report('TikTok browser connection stopped; reopening the saved browser profile…')
                     old=self.driver
                     self.driver=None
