@@ -100,6 +100,24 @@ def test_failure_diagnostics_log_only_static_callsite(caplog):
     assert 'secret' not in caplog.text and 'product details' not in caplog.text
 
 
+def test_emoji_description_uses_browser_text_insertion_without_losing_unicode():
+    from types import SimpleNamespace
+    from selenium.webdriver.common.keys import Keys
+    calls=[]
+    class Element:
+        def click(self): calls.append(('click',))
+        def send_keys(self,*keys):
+            if any(any(ord(c)>65535 for c in key) for key in keys):
+                raise AssertionError('ChromeDriver send_keys cannot handle non-BMP text')
+            calls.append(('keys',keys))
+    browser=SimpleNamespace(driver=SimpleNamespace(execute_cdp_cmd=lambda name,args:calls.append((name,args))))
+    form=SeleniumListingForm(browser); form.field=lambda name:Element()
+    text='Christmas teacher gift 🎄\nPersonalised for you 🎁'
+    form.set_field('description',text)
+    assert ('Input.insertText',{'text':text}) in calls
+    assert calls[-1]==('keys',(Keys.TAB,))
+
+
 def test_fractional_pennies_are_rejected_instead_of_changing_the_price(tmp_path):
     listing=product(tmp_path); listing['variants'][0]['price']='18.555'
     with pytest.raises(ValueError,match='decimal'): prepare_plan(listing,tmp_path)

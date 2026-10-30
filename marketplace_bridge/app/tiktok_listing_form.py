@@ -212,7 +212,12 @@ class SeleniumListingForm:
                 unit.click(); self.text_control('Grams (g)').click()
         element=self.field(name)
         element.click(); element.send_keys(Keys.CONTROL,'a'); element.send_keys(Keys.BACKSPACE)
-        if value: element.send_keys(value)
+        if value:
+            if name=='description' or any(ord(char)>0xffff for char in value):
+                # Native text insertion supports emoji and contenteditable input
+                # events without rewriting ProseMirror's DOM or internal state.
+                self.driver.execute_cdp_cmd('Input.insertText',{'text':value})
+            else: element.send_keys(value)
         element.send_keys(Keys.TAB)
 
     def upload(self,paths):
