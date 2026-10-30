@@ -118,6 +118,16 @@ def test_emoji_description_uses_browser_text_insertion_without_losing_unicode():
     assert calls[-1]==('keys',(Keys.TAB,))
 
 
+def test_upload_confirmation_reads_current_image_sources_atomically():
+    from types import SimpleNamespace
+    calls=[]
+    def read(script): calls.append(script); return ['blob:uploaded-photo']
+    def stale(*args): raise AssertionError('React replaces image nodes while upload completes')
+    browser=SimpleNamespace(driver=SimpleNamespace(execute_script=read,find_elements=stale))
+    assert SeleniumListingForm(browser).image_sources()=={'blob:uploaded-photo'}
+    assert len(calls)==1
+
+
 def test_fractional_pennies_are_rejected_instead_of_changing_the_price(tmp_path):
     listing=product(tmp_path); listing['variants'][0]['price']='18.555'
     with pytest.raises(ValueError,match='decimal'): prepare_plan(listing,tmp_path)
