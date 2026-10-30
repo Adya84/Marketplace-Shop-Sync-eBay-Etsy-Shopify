@@ -91,6 +91,15 @@ def test_browser_failures_identify_the_stage_without_exposing_driver_details(tmp
     assert 'secret' not in str(error.value)
 
 
+def test_failure_diagnostics_log_only_static_callsite(caplog):
+    from app.tiktok_listing_form import _at_stage
+    from urllib3.exceptions import ProtocolError
+    def broken(): raise ProtocolError('secret token and product details')
+    with pytest.raises(ValueError): _at_stage('bounded form read',broken)
+    assert 'bounded form read' in caplog.text and 'ProtocolError' in caplog.text
+    assert 'secret' not in caplog.text and 'product details' not in caplog.text
+
+
 def test_fractional_pennies_are_rejected_instead_of_changing_the_price(tmp_path):
     listing=product(tmp_path); listing['variants'][0]['price']='18.555'
     with pytest.raises(ValueError,match='decimal'): prepare_plan(listing,tmp_path)
@@ -114,11 +123,42 @@ def test_existing_parcel_details_cannot_be_overwritten(tmp_path,field,existing):
     from types import SimpleNamespace
     plan=prepare_plan(product(tmp_path),tmp_path)
     if field=='weight_g' and existing=='1225': plan['weight_g']=''
-    browser=SimpleNamespace(driver=SimpleNamespace(find_elements=lambda *args:[]),guard=lambda:None)
+    state=blank_snapshot(); state['parcel'][field]=existing; state['counts'][field]=1
+    browser=SimpleNamespace(driver=SimpleNamespace(execute_script=lambda *args:state),guard=lambda:None)
     form=SeleniumListingForm(browser)
-    values={key:'' for key in form.fields}; values[field]=existing
-    form.value=lambda name:values[name]
-    form.image_sources=lambda:set()
-    form.one=lambda selector:SimpleNamespace(text='')
-    form.driver.find_elements=lambda by,selector: [SimpleNamespace(is_displayed=lambda:True)] if selector==form.fields[field] else []
     with pytest.raises(ValueError,match='parcel'): form.assert_blank(plan)
+
+
+def blank_snapshot():
+    return {'title':'','description':'','description_media':0,'photos':0,'category':'','brand':'',
+            'sales_values':[],'variations':False,'parcel':{key:'' for key in ('weight_g','height_cm','width_cm','length_cm')},
+            'counts':{'title':1,'description':1,'images':1,'category':1,'brand':0,'sale':0,
+                      'weight_g':0,'height_cm':0,'width_cm':0,'length_cm':0}}
+
+
+def test_blank_form_preflight_uses_one_bounded_dom_read(tmp_path):
+    from types import SimpleNamespace
+    calls=[]
+    def snapshot(script): calls.append(script); return blank_snapshot()
+    def native(*args): raise AssertionError('Preflight must not call native element inspection commands')
+    browser=SimpleNamespace(guard=lambda:None,driver=SimpleNamespace(execute_script=snapshot,find_elements=native))
+    SeleniumListingForm(browser).assert_blank(prepare_plan(product(tmp_path),tmp_path))
+    assert len(calls)==1
+
+
+@pytest.mark.parametrize('update',[
+    {'title':'Already entered'}, {'description':'Seller text'}, {'description_media':1}, {'photos':1},
+    {'category':'Other category'}, {'brand':'Other brand'}, {'sales_values':['4']}, {'variations':True}])
+def test_dom_snapshot_rejects_occupied_fields(tmp_path,update):
+    from types import SimpleNamespace
+    state=blank_snapshot(); state.update(update)
+    browser=SimpleNamespace(guard=lambda:None,driver=SimpleNamespace(execute_script=lambda *args:state))
+    with pytest.raises(ValueError): SeleniumListingForm(browser).assert_blank(prepare_plan(product(tmp_path),tmp_path))
+
+
+@pytest.mark.parametrize('state',[None,{},dict(blank_snapshot(),counts=dict(blank_snapshot()['counts'],title=2)),
+    dict(blank_snapshot(),counts=dict(blank_snapshot()['counts'],description=0))])
+def test_dom_snapshot_fails_closed_when_missing_or_ambiguous(tmp_path,state):
+    from types import SimpleNamespace
+    browser=SimpleNamespace(guard=lambda:None,driver=SimpleNamespace(execute_script=lambda *args:state))
+    with pytest.raises(ValueError): SeleniumListingForm(browser).assert_blank(prepare_plan(product(tmp_path),tmp_path))

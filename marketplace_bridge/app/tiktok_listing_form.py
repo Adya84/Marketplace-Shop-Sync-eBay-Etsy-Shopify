@@ -1,8 +1,35 @@
 """Prepare an unsaved Seller Center form through the signed-in browser only."""
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+import logging
 from .listings import validate_listing
 from .listing_publishers import photo_bytes
+
+# A bounded read of rendered controls only. No application state or endpoints.
+PREFLIGHT_DOM=r'''
+const visible=e=>{if(!e||!e.getClientRects().length)return false;let p=e;
+ for(let i=0;p&&i<100;i++,p=p.parentElement){let s=getComputedStyle(p);
+ if(s.display==='none'||s.visibility==='hidden'||s.opacity==='0')return false;}return !p;};
+const all=s=>Array.from(document.querySelectorAll(s)).filter(visible);
+const cut=v=>String(v??'').slice(0,50001), counts={}, pick=(name,s)=>{let a=all(s);counts[name]=a.length;return a.length===1?a[0]:null;};
+const title=pick('title','input[data-id="product.publish.product_name"]');
+const description=pick('description','#preview-product-description .ProseMirror[contenteditable=true]');
+const images=pick('images','#preview-product-image');
+const category=pick('category','[data-id="product.publish.category"]');
+const brands=all('[role=combobox]:has(input[placeholder="Select a brand"])');
+counts.brand=brands.length;
+const sale=pick('sale','#preview-sale-information');
+const inputs=sale?Array.from(sale.querySelectorAll('input')).filter(e=>visible(e)&&!['radio','checkbox'].includes(e.type)&&e.getAttribute('aria-hidden')!=='true'):[];
+const parcel={}, selectors={weight_g:'[data-id="product.publish.package_weight"] input[placeholder="Enter the parcel weight"]',height_cm:'input[placeholder="Height"]',width_cm:'input[placeholder="Width"]',length_cm:'input[placeholder="Length"]'};
+for(let [name,selector] of Object.entries(selectors)){let e=pick(name,selector);parcel[name]=e?cut(e.value):'';}
+return {title:title?cut(title.value):'',description:description?cut(description.innerText):'',
+ description_media:description?description.querySelectorAll('img,video,iframe').length:0,
+ photos:images?Array.from(images.querySelectorAll('img')).filter(e=>(e.currentSrc||e.src)&&!(e.currentSrc||e.src).includes('image-upload-placeholder-')).length:0,
+ category:category?cut(category.innerText):'',brand:brands.length===1?cut(brands[0].innerText):'',
+ sales_values:inputs.slice(0,251).map(e=>cut(e.value)),overflow:inputs.length>251,
+ variations:!!(sale&&Array.from(sale.querySelectorAll('[role=switch]')).some(e=>e.getAttribute('aria-checked')==='true')),
+ parcel,counts};
+'''
 
 
 def prepare_plan(listing,photos):
@@ -48,6 +75,14 @@ def _at_stage(stage,action,*args):
     except (ValueError,OrderProblem): raise
     except Exception as exc:
         from .order_browser import browser_failure
+        # Never log exception strings, arguments, page contents or tracebacks.
+        trace=exc.__traceback__; site='unknown'
+        while trace:
+            code=trace.tb_frame.f_code
+            if Path(code.co_filename).name in ('tiktok_listing_form.py','order_browser.py'):
+                site=Path(code.co_filename).name+':'+code.co_name+':'+str(trace.tb_lineno)
+            trace=trace.tb_next
+        logging.getLogger(__name__).warning('TikTok transfer stage=%s failure=%s site=%s',stage,browser_failure(exc),site)
         raise ValueError('TikTok transfer stopped during '+stage+' ('+browser_failure(exc)+'). Review the unsaved browser form before retrying.') from None
 
 
@@ -96,37 +131,44 @@ class SeleniumListingForm:
                 if e.get_attribute('src') and 'image-upload-placeholder-' not in e.get_attribute('src')}
 
     def assert_blank(self,plan):
-        if self.value('title').strip() or self.value('description').strip() or self.image_sources():
+        _at_stage('shop identity verification',self.browser.guard)
+        state=_at_stage('bounded form read',self.driver.execute_script,PREFLIGHT_DOM)
+        numeric=('weight_g','height_cm','width_cm','length_cm')
+        required=('title','description','images','category')
+        optional=('brand','sale',*numeric)
+        if not isinstance(state,dict) or not isinstance(state.get('counts'),dict) or not isinstance(state.get('parcel'),dict):
+            raise ValueError('TikTok form could not be read safely. Wait for the page to finish loading.')
+        counts=state['counts']
+        if any(type(counts.get(key)) is not int or counts[key]!=1 for key in required) or any(type(counts.get(key)) is not int or counts[key] not in (0,1) for key in optional):
+            raise ValueError('TikTok form controls are missing or ambiguous. Wait for the page to finish loading.')
+        if (any(not isinstance(state.get(key),str) for key in ('title','description','category','brand')) or
+            any(not isinstance(state['parcel'].get(key),str) for key in numeric) or
+            type(state.get('photos')) is not int or state['photos']<0 or
+            type(state.get('description_media')) is not int or state['description_media']<0 or
+            type(state.get('variations')) is not bool or not isinstance(state.get('sales_values'),list) or
+            len(state['sales_values'])>251 or any(not isinstance(value,str) for value in state['sales_values']) or state.get('overflow')):
+            raise ValueError('TikTok form could not be read safely. Review the browser before continuing.')
+        if state['title'].strip() or state['description'].strip() or state['description_media'] or state['photos']:
             raise ValueError('An unfinished TikTok form is open. Finish or clear it in the browser before transferring another listing.')
-        current=self.one('[data-id="product.publish.category"]').text.strip()
+        current=state['category'].strip()
         if current and current!=plan['category']:
             raise ValueError('A different TikTok category is already selected. Clear the unfinished form before transferring.')
-        brands=self.driver.find_elements('css selector','[role=combobox]:has(input[placeholder="Select a brand"])')
-        if len(brands)>1: raise ValueError('TikTok brand controls are ambiguous.')
-        if brands:
-            brand=brands[0].text.strip()
-            if brand and brand!='Select a brand' and brand.casefold()!=plan['brand'].casefold():
-                raise ValueError('A different TikTok brand is already selected. Clear the unfinished form before transferring.')
-        for name in ('weight_g','height_cm','width_cm','length_cm'):
-            controls=self.driver.find_elements('css selector',self.fields[name])
-            if not any(e.is_displayed() for e in controls): continue
-            actual=self.value(name).strip().replace(',','')
+        if current and counts['sale']!=1:
+            raise ValueError('Wait for the TikTok sales fields to finish loading before transferring.')
+        brand=state['brand'].strip()
+        if brand and brand!='Select a brand' and brand.casefold()!=plan['brand'].casefold():
+            raise ValueError('A different TikTok brand is already selected. Clear the unfinished form before transferring.')
+        for name in numeric:
+            actual=state['parcel'][name].strip().replace(',','')
             if not actual: continue
             try: equal=bool(plan[name]) and Decimal(actual)==Decimal(plan[name])
             except InvalidOperation: equal=False
             if not equal:
                 raise ValueError('Existing TikTok parcel details differ from this listing. Check or clear them in the browser before transferring.')
-        # A user can have entered only price/stock or variation values.
-        sale=self.driver.find_elements('css selector','#preview-sale-information')
-        if len(sale)>1: raise ValueError('TikTok sales controls are ambiguous.')
-        if sale:
-            inputs=sale[0].find_elements('css selector','input')
-            if any(e.is_displayed() and e.get_attribute('type') not in ('radio','checkbox') and
-                   e.get_attribute('aria-hidden')!='true' and (e.get_attribute('value') or '').strip()
-                   for e in inputs):
-                raise ValueError('An unfinished TikTok price or variation form is open. Finish or clear it before transferring.')
-            if any(e.get_attribute('aria-checked')=='true' for e in sale[0].find_elements('css selector','[role=switch]')):
-                raise ValueError('The TikTok variation editor is open. Turn off Add variations for a single-SKU transfer.')
+        if any(value.strip() for value in state['sales_values']):
+            raise ValueError('An unfinished TikTok price or variation form is open. Finish or clear it before transferring.')
+        if state['variations']:
+            raise ValueError('The TikTok variation editor is open. Turn off Add variations for a single-SKU transfer.')
 
     @staticmethod
     def xpath_literal(text):
@@ -199,5 +241,13 @@ def transfer_listing(browser,listing,photos):
     # All validation is completed before opening or changing a browser form.
     plan=prepare_plan(listing,photos)
     with browser.lock:
-        _at_stage('opening product editor',browser.open_listing_editor)
-        return fill_form(SeleniumListingForm(browser),plan)
+        try:
+            _at_stage('opening product editor',browser.open_listing_editor)
+            return fill_form(SeleniumListingForm(browser),plan)
+        except Exception:
+            # poll() reads the local child status; do not send another command
+            # to a failed driver or attempt to restart an unsaved product tab.
+            process=getattr(getattr(browser.driver,'service',None),'process',None)
+            exit_code=process.poll() if process is not None else None
+            logging.getLogger(__name__).warning('TikTok transfer driver_exit=%s',exit_code)
+            raise

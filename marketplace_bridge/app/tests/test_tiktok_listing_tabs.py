@@ -1,6 +1,8 @@
 import threading
+import pytest
 from types import SimpleNamespace
 from app.order_browser import TikTokBrowser
+from app.order_models import OrderProblem
 
 
 class Driver:
@@ -41,3 +43,15 @@ def test_idle_refresh_never_refreshes_an_unsaved_product_form():
     browser.driver=Driver(); browser.order_window='orders'; browser.listing_window='listing'
     browser.refresh_idle()
     assert browser.driver.loads==[('orders','refresh')]
+
+
+def test_broken_driver_with_listing_open_is_not_quit_or_recreated():
+    from urllib3.exceptions import ProtocolError
+    calls=[]
+    class BrokenDriver:
+        def execute_script(self,*args): raise ProtocolError('private transport details')
+        def quit(self): calls.append('quit')
+    browser=TikTokBrowser('profile',lambda:{})
+    driver=BrokenDriver(); browser.driver=driver; browser.listing_window='listing'
+    with pytest.raises(OrderProblem,match='open listing'): browser.start()
+    assert browser.driver is driver and calls==[]
