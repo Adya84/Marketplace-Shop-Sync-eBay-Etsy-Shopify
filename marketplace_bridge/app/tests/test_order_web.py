@@ -58,7 +58,7 @@ def test_empty_queue_verifies_preview_but_signout_pauses_without_writes(tmp_path
     original=web.OrderStore.configure
     def configure(self,**values):
         original(self,**values)
-        if values.get('last_message','').startswith(('Scan complete:','TikTok sign-in expired')):
+        if values.get('latest_run',{}).get('state') in {'completed','failed'}:
             finished.set()
     monkeypatch.setattr(web,'TikTokBrowser',Browser)
     monkeypatch.setattr(web,'OrderShopify',Shopify)
