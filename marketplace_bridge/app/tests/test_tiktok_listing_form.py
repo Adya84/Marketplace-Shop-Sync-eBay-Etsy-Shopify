@@ -41,7 +41,7 @@ def test_invalid_settings_stop_before_browser_changes(tmp_path,key,value,expecte
 
 
 def test_transfer_never_silently_loses_variants_or_uses_other_currency(tmp_path):
-    listing=product(tmp_path); listing['variants'][0]['options']=[{'name':'Size','value':'Large'}]
+    listing=product(tmp_path); listing['variants'][0]['options']=[{'name':str(i),'value':'Large'} for i in range(4)]
     with pytest.raises(ValueError,match='variation'): prepare_plan(listing,tmp_path)
     listing=product(tmp_path); listing['currency']='USD'
     with pytest.raises(ValueError,match='GBP'): prepare_plan(listing,tmp_path)

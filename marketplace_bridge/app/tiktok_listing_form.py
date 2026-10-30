@@ -37,13 +37,35 @@ def prepare_plan(listing,photos):
     if issues: raise ValueError(' '.join(issues))
     if listing['currency']!='GBP': raise ValueError('The UK TikTok browser requires GBP prices.')
     variants=listing['variants']
-    if len(variants)!=1 or variants[0].get('options'):
-        raise ValueError('TikTok browser variation transfer is not available yet. Your complete variation listing remains saved in Shop Sync.')
+    if len(variants)>100: raise ValueError('TikTok browser transfer currently supports at most 100 SKU rows.')
+    options=variants[0].get('options') or []
+    if len(options)>3: raise ValueError('TikTok supports up to three variation options.')
+    names=[option['name'] for option in options]
+    if len({name.casefold() for name in names})!=len(names):
+        raise ValueError('TikTok variation names must be distinct.')
+    axes=[{'name':name,'values':[]} for name in names]; rows=[]
+    for item in variants:
+        if item['quantity']>999999: raise ValueError('TikTok stock must be 999999 or fewer per SKU.')
+        if Decimal(str(item['price'])).as_tuple().exponent < -2:
+            raise ValueError('TikTok prices need at most two decimal places.')
+        if len(item['sku'])>50: raise ValueError('TikTok Seller SKU must be 50 characters or fewer.')
+        values=[]
+        for axis,option in zip(axes,item.get('options') or []):
+            value=option['value']; name=option['name']
+            if value!=value.strip() or name!=name.strip() or len(value)>50 or len(name)>50:
+                raise ValueError('TikTok variation names and option values need at most 50 characters and no surrounding spaces.')
+            if value not in axis['values']:
+                if value.casefold() in {v.casefold() for v in axis['values']}:
+                    raise ValueError('TikTok option values must be unambiguous, including case.')
+                axis['values'].append(value)
+            values.append(value)
+        rows.append({'values':values,'sku':item['sku'],'stock':str(item['quantity']),
+                     'price':format(Decimal(str(item['price'])),'.2f')})
+    combinations=1
+    for axis in axes: combinations*=len(axis['values'])
+    if combinations!=len(rows):
+        raise ValueError('TikTok needs every option combination. Add the missing variants or adjust this shop version; no SKU will be invented.')
     variant=variants[0]
-    if variant['quantity']>999999: raise ValueError('TikTok stock must be 999999 or fewer per SKU.')
-    if Decimal(str(variant['price'])).as_tuple().exponent < -2:
-        raise ValueError('TikTok prices need at most two decimal places.')
-    if len(variant['sku'])>50: raise ValueError('TikTok Seller SKU must be 50 characters or fewer.')
     settings=listing.get('settings') or {}
     category=' - '.join(part.strip() for part in str(settings.get('category_path') or '').split('>'))
     if not category or any(not part.strip() for part in category.split(' - ')):
@@ -61,7 +83,7 @@ def prepare_plan(listing,photos):
     for name in listing['photos']:
         photo_bytes(photos,name)
         paths.append(str((Path(photos)/name).resolve()))
-    return {'title':listing['title'],'description':listing['description'],
+    return {'title':listing['title'],'description':listing['description'],'axes':axes,'rows':rows,
             'stock':str(variant['quantity']),'price':format(Decimal(str(variant['price'])),'.2f'),
             'sku':variant['sku'],'category':category,'brand':str(settings.get('brand') or '').strip(),
             'weight_g':amount('weight_kg',100000,1000,required=False),
