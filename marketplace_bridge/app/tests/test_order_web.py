@@ -58,7 +58,7 @@ def test_empty_queue_verifies_preview_but_signout_pauses_without_writes(tmp_path
     original=web.OrderStore.configure
     def configure(self,**values):
         original(self,**values)
-        if values.get('last_message','').startswith(('Scan complete:','TikTok sign-in expired')):
+        if values.get('last_message','').startswith('Scan complete:') or values.get('latest_run',{}).get('state')=='failed':
             finished.set()
     monkeypatch.setattr(web,'TikTokBrowser',Browser)
     monkeypatch.setattr(web,'OrderShopify',Shopify)
@@ -75,6 +75,11 @@ def test_empty_queue_verifies_preview_but_signout_pauses_without_writes(tmp_path
         assert store.settings()['enabled'] is not signed_out
         assert store.settings().get('preview_verified',False) is not signed_out
         assert bool(store.settings().get('last_success_at')) is not signed_out
+        run=store.settings()['latest_run']
+        assert run['state']==('failed' if signed_out else 'completed')
+        assert run['completed_at']
+        assert run['counts']['imported']==0
+        if signed_out: assert client.get('/orders/status').json()['next_scan_seconds'] is None
         assert store.list_orders()==[]
 
 @pytest.mark.asyncio
@@ -281,3 +286,33 @@ def test_review_order_does_not_block_verified_orders(tmp_path,monkeypatch,valid_
         assert result.status_code==(200 if valid_order else 400)
         if valid_order: assert finished.wait(3)
         assert created==([sample().order_id] if valid_order else [])
+
+
+def test_clear_display_keeps_order_identity_and_uses_csrf(tmp_path,monkeypatch):
+    from app.tests.test_orders import sample
+    monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
+    core=SimpleNamespace(settings=SimpleNamespace(data_dir=tmp_path),secrets=SecretBox.from_file(tmp_path/'key'),
+                         get_credentials=lambda _:dict(shop_domain='test.myshopify.com'))
+    app=FastAPI();store=mount_orders(app,core,lambda _:None)
+    order=sample();store.record(order,'linked','Imported into Shopify','gid://shopify/Order/1')
+    with TestClient(app) as client:
+        page=client.get('/orders').text
+        csrf=re.search(r'"csrf": "([^"]+)"',page)[1]
+        assert client.post('/orders/clear-results').status_code==403
+        assert client.post('/orders/clear-results',headers={'x-order-csrf':csrf}).status_code==200
+        assert store.get(order.shop_id,order.order_id)['shopify_id']=='gid://shopify/Order/1'
+        assert order.order_id not in client.get('/orders').text
+        assert client.get('/orders/status').json()['results_hidden'] is True
+
+
+def test_restart_marks_persisted_scan_interrupted(tmp_path,monkeypatch):
+    monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
+    core=SimpleNamespace(settings=SimpleNamespace(data_dir=tmp_path),secrets=SecretBox.from_file(tmp_path/'key'),
+                         get_credentials=lambda _:dict(shop_domain='test.myshopify.com'))
+    store=mount_orders(FastAPI(),core,lambda _:None)
+    store.configure(latest_run={'state':'running','mode':'import','started_at':'2026-10-30T12:00:00Z'})
+    app=FastAPI();mount_orders(app,core,lambda _:None)
+    with TestClient(app) as client:
+        run=client.get('/orders/status').json()['latest_run']
+        assert run['state']=='failed'
+        assert 'interrupted' in run['message']
