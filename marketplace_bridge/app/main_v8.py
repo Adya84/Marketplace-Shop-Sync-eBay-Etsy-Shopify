@@ -8,7 +8,7 @@ from .workspace_navigation import workspace_navigation
 import re
 
 app=v7.app
-app.version='0.0.35-beta4'
+app.version='0.0.35-beta5'
 order_store=mount_orders(app,core,_shopify_client)
 listing_store=mount_listings(app,core,_shopify_client)
 _drop_route('/','GET')
