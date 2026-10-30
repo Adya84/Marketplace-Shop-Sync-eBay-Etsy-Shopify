@@ -112,7 +112,7 @@ def test_emoji_description_uses_browser_text_insertion_without_losing_unicode():
             calls.append(('keys',keys))
     browser=SimpleNamespace(driver=SimpleNamespace(execute_cdp_cmd=lambda name,args:calls.append((name,args))))
     form=SeleniumListingForm(browser); form.field=lambda name:Element()
-    text='Christmas teacher gift 🎄\nPersonalised for you 🎁'
+    text='Christmas teacher gift 🎄'+chr(10)+'Personalised for you 🎁'
     form.set_field('description',text)
     assert ('Input.insertText',{'text':text}) in calls
     assert calls[-1]==('keys',(Keys.TAB,))
