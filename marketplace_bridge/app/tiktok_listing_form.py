@@ -37,13 +37,36 @@ def prepare_plan(listing,photos):
     if issues: raise ValueError(' '.join(issues))
     if listing['currency']!='GBP': raise ValueError('The UK TikTok browser requires GBP prices.')
     variants=listing['variants']
-    if len(variants)!=1 or variants[0].get('options'):
-        raise ValueError('TikTok browser variation transfer is not available yet. Your complete variation listing remains saved in Shop Sync.')
+    if len(variants)>100: raise ValueError('TikTok browser transfer currently supports at most 100 SKU rows.')
+    options=variants[0].get('options') or []
+    if len(options)>3: raise ValueError('TikTok supports up to three variation options.')
+    names=[option['name'] for option in options]
+    if len({name.casefold() for name in names})!=len(names):
+        raise ValueError('TikTok variation names must be distinct.')
+    axes=[{'name':name,'values':[]} for name in names]; rows=[]
+    for item in variants:
+        if item['quantity']>999999: raise ValueError('TikTok stock must be 999999 or fewer per SKU.')
+        if Decimal(str(item['price'])).as_tuple().exponent < -2:
+            raise ValueError('TikTok prices need at most two decimal places.')
+        if len(item['sku'])>50: raise ValueError('TikTok Seller SKU must be 50 characters or fewer.')
+        values=[]
+        for axis,option in zip(axes,item.get('options') or []):
+            value=option['value']; name=option['name']
+            if (value!=value.strip() or name!=name.strip() or len(value)>50 or len(name)>50 or
+                any(ord(char)<32 or ord(char)==127 for char in name+value)):
+                raise ValueError('TikTok variation names and option values need at most 50 characters, no control characters and no surrounding spaces.')
+            if value not in axis['values']:
+                if value.casefold() in {v.casefold() for v in axis['values']}:
+                    raise ValueError('TikTok option values must be unambiguous, including case.')
+                axis['values'].append(value)
+            values.append(value)
+        rows.append({'values':values,'sku':item['sku'],'stock':str(item['quantity']),
+                     'price':format(Decimal(str(item['price'])),'.2f')})
+    combinations=1
+    for axis in axes: combinations*=len(axis['values'])
+    if combinations!=len(rows):
+        raise ValueError('TikTok needs every option combination. Add the missing variants or adjust this shop version; no SKU will be invented.')
     variant=variants[0]
-    if variant['quantity']>999999: raise ValueError('TikTok stock must be 999999 or fewer per SKU.')
-    if Decimal(str(variant['price'])).as_tuple().exponent < -2:
-        raise ValueError('TikTok prices need at most two decimal places.')
-    if len(variant['sku'])>50: raise ValueError('TikTok Seller SKU must be 50 characters or fewer.')
     settings=listing.get('settings') or {}
     category=' - '.join(part.strip() for part in str(settings.get('category_path') or '').split('>'))
     if not category or any(not part.strip() for part in category.split(' - ')):
@@ -61,7 +84,7 @@ def prepare_plan(listing,photos):
     for name in listing['photos']:
         photo_bytes(photos,name)
         paths.append(str((Path(photos)/name).resolve()))
-    return {'title':listing['title'],'description':listing['description'],
+    return {'title':listing['title'],'description':listing['description'],'axes':axes,'rows':rows,
             'stock':str(variant['quantity']),'price':format(Decimal(str(variant['price'])),'.2f'),
             'sku':variant['sku'],'category':category,'brand':str(settings.get('brand') or '').strip(),
             'weight_g':amount('weight_kg',100000,1000,required=False),
@@ -91,7 +114,9 @@ def fill_form(form,plan):
     _at_stage('category selection',form.category,plan['category'])
     if plan['brand']: _at_stage('brand selection',form.brand,plan['brand'])
     for name in ('title','description','stock','price','sku','weight_g','height_cm','width_cm','length_cm'):
+        if plan.get('axes') and name in ('stock','price','sku'): continue
         if plan[name]!='' or name=='weight_g': _at_stage(name.replace('_',' '),form.set_field,name,plan[name])
+    if plan.get('axes'): _at_stage('variation transfer',form.variations,plan)
     _at_stage('photo upload',form.upload,plan['photos'])
     _at_stage('field verification',form.verify,plan)
     return {'state':'needs_review','message':'Details and photos transferred to TikTok. Review parcel measurements, brand, attributes and compliance in the browser before submitting. This has not been published.'}
@@ -233,6 +258,100 @@ class SeleniumListingForm:
             else: element.send_keys(value)
         element.send_keys(Keys.TAB)
 
+    def insert_text(self,element,value):
+        from selenium.webdriver.common.keys import Keys
+        element.click(); element.send_keys(Keys.CONTROL,'a'); element.send_keys(Keys.BACKSPACE)
+        if value: self.driver.execute_cdp_cmd('Input.insertText',{'text':value})
+        element.send_keys(Keys.TAB)
+
+    def variation_group(self,index):
+        self.browser.guard()
+        names=[e for e in self.driver.find_elements('css selector','[data-id^="product.publish.sale_property.name."]') if e.is_displayed()]
+        if len(names)!=index+1:
+            raise ValueError('TikTok variation controls changed. Review the browser form.')
+        wrapper=names[index]
+        group=wrapper.find_element('xpath',"ancestor::*[.//input[starts-with(@data-id,'product.publish.sale_property.value.name.')]][1]")
+        return wrapper,group
+
+    def variation_rows(self,plan):
+        from .tiktok_listing_variations import TABLE_DOM, decode_rows
+        self.browser.guard()
+        return decode_rows(self.driver.execute_script(TABLE_DOM),[axis['name'] for axis in plan['axes']])
+
+    def choose_variation_name(self,wrapper,name):
+        wrapper.click()
+        # Fixed picker action identifies the open popup. User text must never
+        # be resolved through a page-wide selector (it may name Submit/Save).
+        addnew=self.text_control('Add new')
+        popup=addnew.find_element('xpath',"ancestor::*[contains(concat(' ',normalize-space(@class),' '),' core-cascader-popup ')][1]")
+        options=[e for e in popup.find_elements('css selector','[role=menuitem], [role=option]') if e.is_displayed() and e.text.strip()==name]
+        if len(options)>1: raise ValueError('TikTok variation name is ambiguous. Review the browser form.')
+        if options:
+            options[0].click(); return
+        addnew.click()
+        entries=[e for e in popup.find_elements('css selector','input') if e.is_displayed() and e.get_attribute('aria-hidden')!='true']
+        if len(entries)!=1: raise ValueError('TikTok custom variation name is ambiguous. Review the browser form.')
+        self.insert_text(entries[0],name)
+        adds=[e for e in popup.find_elements('xpath',".//*[normalize-space(.)='Add' and not(.//*[normalize-space(.)='Add'])]") if e.is_displayed()]
+        if len(adds)!=1: raise ValueError('TikTok custom variation Add action is ambiguous. Review the browser form.')
+        adds[0].click()
+
+    def set_variation_field(self,plan,expected,name):
+        from .tiktok_listing_variations import TABLE_DOM, decode_rows, match_rows
+        current=self.variation_rows(plan)
+        indices=match_rows(plan['rows'],[row['values'] for row in current])
+        row=current[indices[expected['sku']]]
+        sku=self.one('input[id="'+row['id']+'"]')
+        container=sku.find_element('xpath','ancestor::tr[1]')
+        selector={'stock':'input[role=spinbutton][aria-valuemax="999999"]:not([placeholder])',
+                  'price':'input[currency]:not([placeholder])','sku':'input[id^=skus]'}[name]
+        targets=[e for e in container.find_elements('css selector',selector) if e.is_displayed()]
+        if len(targets)!=1: raise ValueError('TikTok variation field is ambiguous. Review the browser form.')
+        # Validate the acquired live control, not just the earlier row ID. React
+        # can replace/reuse table nodes while its option matrix settles.
+        check=self.driver.execute_script('const snapshot=(()=>{'+TABLE_DOM+'''})();
+            const row=arguments[0].closest('tr');
+            return {snapshot,id:row?.querySelector('input[id^=skus]')?.id||'',
+                    connected:!!(row&&row.isConnected&&arguments[0].isConnected)};''',targets[0])
+        if not isinstance(check,dict) or check.get('connected') is not True:
+            raise ValueError('TikTok variation control changed. Review the browser form.')
+        live=decode_rows(check.get('snapshot'),[axis['name'] for axis in plan['axes']])
+        match_rows(plan['rows'],[r['values'] for r in live])
+        linked=[r for r in live if r['id']==check.get('id')]
+        if len(linked)!=1 or linked[0]['values']!=expected['values']:
+            raise ValueError('TikTok variation row changed before entry. Review the browser form.')
+        self.insert_text(targets[0],expected[name])
+
+    def variations(self,plan):
+        from .tiktok_listing_variations import match_rows, verify_rows
+        switch=self.one('[data-id="product.publish.variation.switch"] [role=switch]')
+        if switch.get_attribute('aria-checked')!='false':
+            raise ValueError('An unfinished TikTok variation editor is open. Review it before transferring.')
+        switch.click()
+        self.browser.wait(lambda:bool(self.driver.find_elements('css selector','[data-id^="product.publish.sale_property.name."]')))
+        for index,axis in enumerate(plan['axes']):
+            if index:
+                self.text_control('Add variation').click()
+                self.browser.wait(lambda:len(self.driver.find_elements('css selector','[data-id^="product.publish.sale_property.name."]'))==index+1)
+            wrapper,group=self.variation_group(index)
+            self.choose_variation_name(wrapper,axis['name'])
+            self.browser.wait(lambda:self.variation_group(index)[0].text.strip()==axis['name'])
+            for option_index,value in enumerate(axis['values']):
+                if option_index:
+                    _,group=self.variation_group(index)
+                    add_options=[e for e in group.find_elements('xpath',".//*[normalize-space(.)='Add option' and not(.//*[normalize-space(.)='Add option'])]") if e.is_displayed()]
+                    if len(add_options)!=1: raise ValueError('TikTok option control is ambiguous. Review the browser form.')
+                    add_options[0].click()
+                _,group=self.variation_group(index)
+                inputs=[e for e in group.find_elements('css selector','input[data-id^="product.publish.sale_property.value.name."]') if e.is_displayed()]
+                if len(inputs)!=option_index+1: raise ValueError('TikTok variation option count changed. Review the browser form.')
+                self.insert_text(inputs[option_index],value)
+        # The table can reorder or merge labels. Re-read it before EACH field.
+        for expected in plan['rows']:
+            for name in ('stock','price','sku'):
+                self.set_variation_field(plan,expected,name)
+        verify_rows(plan['rows'],self.variation_rows(plan))
+
     def upload(self,paths):
         uploader=self.one('#preview-product-image input[type=file]',visible=False)
         uploader.send_keys('\n'.join(paths))
@@ -240,6 +359,7 @@ class SeleniumListingForm:
 
     def verify(self,plan):
         for name in self.fields:
+            if plan.get('axes') and name in ('stock','price','sku'): continue
             if plan[name]=='' and name!='weight_g': continue
             actual=self.value(name).replace('\r\n','\n').strip()
             expected=plan[name].replace('\r\n','\n').strip()
@@ -249,6 +369,9 @@ class SeleniumListingForm:
                 except InvalidOperation: equal=False
             else: equal=actual==expected
             if not equal: raise ValueError('TikTok did not retain the '+name.replace('_',' ')+'. Review the partially filled form in the browser.')
+        if plan.get('axes'):
+            from .tiktok_listing_variations import verify_rows
+            verify_rows(plan['rows'],self.variation_rows(plan))
         if self.one('[data-id="product.publish.category"]').text.strip()!=plan['category']:
             raise ValueError('TikTok category changed. Review the browser form.')
         if len(self.image_sources())!=len(plan['photos']):

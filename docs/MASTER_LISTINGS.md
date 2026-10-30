@@ -38,3 +38,12 @@ Before production release, use dedicated test products and seller approval to ve
 ## Verification
 
 Run `python -m pytest marketplace_bridge/app/tests -q` with `PYTHONPATH=marketplace_bridge`, and `python -m compileall -q marketplace_bridge/app oauth_broker`. New GraphQL operations were checked against Shopify Admin API `2026-07`. Browser QA covers entry, save/reload, variation generation, shop validation and reusable settings on an isolated localhost preview. Production acceptance and Home Assistant installation remain separate.
+
+### Live baseline and variation continuation (2026-10-30)
+Version 0.0.35-beta7 is installed and passed the unsaved single-SKU TikTok test,
+including its original description and photo. The next beta adds complete
+variation transfer, up to three options and 100 SKU rows, preserving each SKU,
+price and stock value. Missing option combinations are blocked; no SKU is
+invented. Submission, existing-product updates and full four-market live
+acceptance still need further work. Earlier beta1 acceptance notes refer to the
+initial source delivery.
