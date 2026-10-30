@@ -297,6 +297,7 @@ def test_clear_display_keeps_order_identity_and_uses_csrf(tmp_path,monkeypatch):
     order=sample();store.record(order,'linked','Imported into Shopify','gid://shopify/Order/1')
     with TestClient(app) as client:
         page=client.get('/orders').text
+        assert '<meta charset="utf-8">' in page
         csrf=re.search(r'"csrf": "([^"]+)"',page)[1]
         assert client.post('/orders/clear-results').status_code==403
         assert client.post('/orders/clear-results',headers={'x-order-csrf':csrf}).status_code==200
