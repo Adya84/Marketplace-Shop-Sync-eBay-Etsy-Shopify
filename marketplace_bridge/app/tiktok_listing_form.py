@@ -124,7 +124,17 @@ class SeleniumListingForm:
 
     def value(self,name):
         element=self.field(name)
-        return element.text if name=='description' else element.get_attribute('value') or ''
+        if name=='description':
+            text=self.driver.execute_script(r'''
+                const root=arguments[0], paragraphs=Array.from(root.children);
+                if(Array.from(root.childNodes).some(n=>n.nodeType===3&&n.textContent.trim())||
+                   paragraphs.some(p=>p.tagName!=='P'||p.querySelector('br:not(.ProseMirror-trailingBreak),img,video,iframe')))
+                    return null;
+                return paragraphs.map(p=>p.textContent).join('\n');''',element)
+            if not isinstance(text,str):
+                raise ValueError('TikTok description structure changed. Review the browser form.')
+            return text
+        return element.get_attribute('value') or ''
 
     def image_sources(self):
         sources=self.driver.execute_script('''return Array.from(document.querySelectorAll('#preview-product-image img'))
