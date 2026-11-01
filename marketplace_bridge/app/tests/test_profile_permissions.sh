@@ -30,6 +30,7 @@ cat > /tmp/profile-test-bin/chown <<'SH'
 for argument in "$@"; do
     case "$argument" in
         -R|*/Cache/Cache_Data/*) echo 'simulated cache ownership failure' >&2; exit 1 ;;
+        */Preferences) if [ "${REJECT_PREFERENCES:-0}" = 1 ]; then exit 1; fi ;;
     esac
 done
 exec /bin/chown "$@"
@@ -38,3 +39,14 @@ chmod +x /tmp/profile-test-bin/chown
 PATH="/tmp/profile-test-bin:$PATH" /usr/local/bin/shop-sync-prepare-profile
 test "$(cat /config/tiktok-browser/Default/Cache/Cache_Data/unchownable)" = cache
 su-exec shopsync-browser test -w /config/tiktok-browser/Default/Cookies
+# Essential profile permission failures must not be hidden.
+printf preferences > /config/tiktok-browser/Default/Preferences
+if REJECT_PREFERENCES=1 PATH="/tmp/profile-test-bin:$PATH" /usr/local/bin/shop-sync-prepare-profile; then
+    echo 'Essential profile ownership failure was ignored' >&2
+    exit 1
+fi
+# A symlink inside the profile must never change an external target's owner.
+printf outside > /tmp/profile-outside
+ln -s /tmp/profile-outside /config/tiktok-browser/outside-link
+PATH="/tmp/profile-test-bin:$PATH" /usr/local/bin/shop-sync-prepare-profile
+test "$(stat -c %u /tmp/profile-outside)" = 0
