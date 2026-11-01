@@ -20,3 +20,21 @@ su-exec shopsync-browser /bin/sh -eu -c '
     test "$(cat /config/tiktok-browser/Default/Cookies)" = cookie-fixture
 '
 /usr/local/bin/shop-sync-chromedriver --version
+
+# Cache entries can be unchownable on the persistent host filesystem.
+# Simulate that error without changing or deleting any saved login data.
+mkdir -p /config/tiktok-browser/Default/Cache/Cache_Data /tmp/profile-test-bin
+printf cache > /config/tiktok-browser/Default/Cache/Cache_Data/unchownable
+cat > /tmp/profile-test-bin/chown <<'SH'
+#!/bin/sh
+for argument in "$@"; do
+    case "$argument" in
+        -R|*/Cache/Cache_Data/*) echo 'simulated cache ownership failure' >&2; exit 1 ;;
+    esac
+done
+exec /bin/chown "$@"
+SH
+chmod +x /tmp/profile-test-bin/chown
+PATH="/tmp/profile-test-bin:$PATH" /usr/local/bin/shop-sync-prepare-profile
+test "$(cat /config/tiktok-browser/Default/Cache/Cache_Data/unchownable)" = cache
+su-exec shopsync-browser test -w /config/tiktok-browser/Default/Cookies
