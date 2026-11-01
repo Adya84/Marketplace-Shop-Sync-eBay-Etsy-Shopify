@@ -1,3 +1,7 @@
+## 0.0.35-beta12
+
+- Exclude disposable Chromium cache trees from startup ownership repair so cache filesystem errors do not stop Shop Sync. Saved login data is preserved; essential profile ownership failures still stop startup.
+
 ## 0.0.35-beta11
 
 - Declare UTF-8 inside the order page so status messages display correctly through Home Assistant Ingress.
