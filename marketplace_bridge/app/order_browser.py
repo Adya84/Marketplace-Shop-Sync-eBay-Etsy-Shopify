@@ -268,11 +268,17 @@ class TikTokBrowser:
         if not name or not re.fullmatch(r'\d{5,30}',config['shop_id']):
             raise OrderProblem('Set the verified TikTok shop name and ID first')
         banner=self.driver.find_elements(By.CSS_SELECTOR,'header, [role=banner]')
-        # Shop switcher has both image alt and visible label in the observed UI.
+        # TikTok's newer UK switcher uses a country/shop label instead of a
+        # shop-logo image. Match that complete label, never a name substring.
         found=[]
         for region in banner:
-            found.extend(e for e in region.find_elements(By.CSS_SELECTOR,'button, [role=button]')
-                         if e.text.strip()==name and any(i.get_attribute('alt')==name for i in e.find_elements(By.CSS_SELECTOR,'img')))
+            for e in region.find_elements(By.CSS_SELECTOR,'button, [role=button]'):
+                if not e.is_displayed(): continue
+                label=' '.join(e.text.split())
+                current=label in {f'United Kingdom ({name})',f'GB United Kingdom ({name})'}
+                legacy=label==name and any(i.get_attribute('alt')==name for i in e.find_elements(By.CSS_SELECTOR,'img'))
+                if current or legacy:
+                    if e not in found: found.append(e)
         if len(found)!=1: raise OrderProblem('TikTok login/shop identity requires review')
 
     def main_text(self):

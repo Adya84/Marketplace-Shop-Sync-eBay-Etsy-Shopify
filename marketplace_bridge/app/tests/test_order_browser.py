@@ -2,6 +2,30 @@ import pytest
 from app.order_browser import parse_detail, parse_tracking
 from app.order_models import OrderProblem
 
+@pytest.mark.parametrize('label,accepted',[
+    ('United Kingdom (Graffidoodle)',True),
+    ('GB\nUnited Kingdom (Graffidoodle)',True),
+    ('United Kingdom (Other shop)',False),
+    ('Graffidoodle customer message',False),
+    ('United Kingdom (Graffidoodle extra)',False),
+])
+def test_current_shop_switcher_requires_exact_shop_identity(label,accepted):
+    from app.order_browser import TikTokBrowser
+    class Button:
+        text=label
+        def find_elements(self,*_): return []
+        def is_displayed(self): return True
+    class Header:
+        def find_elements(self,*_): return [Button()]
+    class Driver:
+        current_url='https://seller-uk.tiktok.com/order'
+        def find_elements(self,*_): return [Header()]
+    browser=TikTokBrowser('unused',lambda:dict(shop_name='Graffidoodle',shop_id='7496165985360775303'))
+    browser.driver=Driver()
+    if accepted: browser.guard()
+    else:
+        with pytest.raises(OrderProblem,match='identity requires review'): browser.guard()
+
 def test_queue_login_redirect_is_detected_before_waiting_for_order_tabs():
     from app.order_browser import TikTokBrowser
     class Driver:

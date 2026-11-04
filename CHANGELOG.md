@@ -1,3 +1,7 @@
+## 0.0.35-beta13
+
+- Recognize TikTok's updated United Kingdom (shop name) header switcher while continuing to reject other shops and ambiguous matches.
+
 ## 0.0.35-beta12
 
 - Exclude disposable Chromium cache trees from startup ownership repair so cache filesystem errors do not stop Shop Sync. Saved login data is preserved; essential profile ownership failures still stop startup.
