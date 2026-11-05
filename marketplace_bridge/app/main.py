@@ -161,7 +161,7 @@ async def start_etsy_oauth(
         "response_type": "code",
         "client_id": keystring.strip(),
         "redirect_uri": settings.etsy_redirect_uri,
-        "scope": "listings_r listings_w shops_r",
+        "scope": "listings_r listings_w shops_r transactions_r",
         "state": state,
         "code_challenge": challenge,
         "code_challenge_method": "S256",

@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Etsy order imports</title>
+<style>body{font:16px system-ui;background:#f3f5fa;color:#18213b;margin:24px}main{max-width:1200px;margin:auto}section{background:white;border-radius:16px;padding:24px;margin:16px 0}button,input{font:inherit;padding:10px;margin:5px}button{background:#253e80;color:white;border:0;border-radius:7px;cursor:pointer}label{display:block}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:10px;border-bottom:1px solid #ddd}#notice,#summary{white-space:pre-wrap}.scroll{overflow:auto}</style></head>
+<body><main><!--NAV--><h1>Etsy orders → Shopify</h1><p>Import paid, unshipped physical Etsy orders for Shopify postage labels. Tracking is entered manually.</p>
+<section><h2>Connection and controls</h2><p>Connect or reconnect Etsy on the Dashboard to approve order-reading access. Missing or restricted shipping addresses are held for review.</p>
+<label>Verified Shopify destination <input id="target" readonly></label>
+<label><input type="checkbox" id="enabled">Import Etsy orders every five minutes</label>
+<button id="save">Save settings</button><button id="preview">Scan and preview</button><button id="import">Import Etsy orders now</button>
+<p id="notice" role="status"></p><p id="summary" role="status"></p><p id="timer"></p></section>
+<section><h2>Import preview and review</h2><p>Enter the actual item weight in grams for new Etsy variants, save with automatic import off, then preview again. Existing import records prevent duplicates.</p>
+<div class="scroll"><table><thead><tr><th>Etsy order</th><th>Status</th><th>Items and weights</th><th>Details</th></tr></thead><tbody id="results"></tbody></table></div></section></main>
+<script>/*BOOT*/
+const el=id=>document.getElementById(id);let weights={...cfg.weights},dirty=false,lastRows='',deadline=null,timerState='Checking status…',saving=false,saveError=false;
+el('target').value=cfg.target_shop;el('enabled').checked=cfg.enabled;
+el('enabled').onchange=()=>{dirty=true;el('notice').textContent='Unsaved changes'};
+function time(value){return new Date(value).toLocaleString('en-GB',{timeZone:'Europe/London'})}
+async function post(action,data){const r=await fetch(cfg.base+'/orders/etsy/'+action,{method:'POST',headers:{'content-type':'application/json','x-order-csrf':cfg.csrf},body:JSON.stringify(data||{})});let result;try{result=await r.json()}catch(e){throw Error('Could not read response; reload this page')}if(!r.ok)throw Error(result.detail||'Etsy request failed');return result}
+function cell(row,text){const td=document.createElement('td');td.textContent=text;row.append(td);return td}
+function render(rows){el('results').replaceChildren();for(const row of rows){const tr=document.createElement('tr');cell(tr,row.id);cell(tr,row.state);const items=cell(tr,'');for(const item of row.items){const label=document.createElement('label');label.textContent=item.quantity+' × '+item.title+' — '+(item.variant||'');if(item.weight_key){const input=document.createElement('input');input.type='number';input.min='1';input.max='100000';input.value=weights[item.weight_key]||'';input.setAttribute('aria-label','Weight in grams for '+item.title+' '+(item.variant||''));input.oninput=()=>{weights[item.weight_key]=Number(input.value);dirty=true;el('notice').textContent='Unsaved weight changes'};label.append(input,document.createTextNode(' g'))}items.append(label)}cell(tr,row.message||'');el('results').append(tr)}}
+async function status(){try{const r=await fetch(cfg.base+'/orders/etsy/status',{cache:'no-store'});if(!r.ok)throw Error();const s=await r.json();el('preview').disabled=s.running;el('import').disabled=s.running;el('save').disabled=s.running||saving;
+deadline=s.next_scan_seconds===null?null:Date.now()+s.next_scan_seconds*1000;timerState=s.running?'Etsy scan in progress':s.automatic?'Next scan due':'Automatic Etsy import off';
+if(!dirty&&!saving){el('enabled').checked=s.automatic;if(s.saved_at&&!saveError)el('notice').textContent='Settings saved at '+time(s.saved_at)}
+const run=s.latest_run;if(run){const c=run.counts||{};el('summary').textContent=run.state==='running'?s.message:(run.state==='failed'?'Scan failed: '+run.message:'Scan completed at '+time(run.completed_at))+'. '+(c.checked||0)+' checked · '+(c.imported||0)+' imported · '+(c.existing||0)+' already in Shopify · '+(c.ready||0)+' ready · '+(c.review||0)+' need review · '+(c.failed||0)+' failed'+(run.mode==='preview'?' — Preview only.':'')}
+const key=JSON.stringify(s.rows);if(key!==lastRows&&!dirty){weights={...s.weights};render(s.rows);lastRows=key}tick()
+}catch(e){deadline=null;timerState='Connection unavailable; scan status is unverified';tick()}}
+function tick(){const n=deadline===null?null:Math.max(0,Math.ceil((deadline-Date.now())/1000));el('timer').textContent=n===null?timerState:n===0?'Next scan due':'Next Etsy scan in '+Math.floor(n/60)+':'+String(n%60).padStart(2,'0')}
+el('save').onclick=async()=>{saving=true;el('notice').textContent='Saving…';const inputs=[...document.querySelectorAll('input')];inputs.forEach(x=>x.disabled=true);try{const result=await post('settings',{enabled:el('enabled').checked,weights,target_shop:el('target').value});dirty=false;saveError=false;el('notice').textContent='Settings saved at '+time(result.saved_at)}catch(e){saveError=true;el('notice').textContent='Not saved: '+e.message}finally{saving=false;inputs.forEach(x=>x.disabled=false)}};
+for(const [id,action] of [['preview','scan'],['import','import']])el(id).onclick=async()=>{try{await post(action);el('notice').textContent='Request accepted';await status()}catch(e){el('notice').textContent=e.message}};
+status();setInterval(status,3000);setInterval(tick,1000);
+</script></body></html>

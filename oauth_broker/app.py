@@ -40,7 +40,7 @@ EBAY_SCOPES = (
     "https://api.ebay.com/oauth/api_scope",
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
 )
-ETSY_SCOPES = ("listings_r", "listings_w", "shops_r")
+ETSY_SCOPES = ("listings_r", "listings_w", "shops_r", "transactions_r")
 
 
 def _require_ebay_config() -> None:

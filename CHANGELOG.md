@@ -1,3 +1,9 @@
+## 0.0.36-beta1
+
+- Add a separate Etsy order-import page, encrypted ledger and five-minute scheduler. Preview paid, unshipped physical UK GBP orders, enter variant weights, then import into Shopify with source-specific duplicate protection.
+- Keep Etsy controls, countdowns and review results separate from TikTok. Include buyer options/personalisation in order lines and hold incomplete addresses, refunds, unsupported tax and totals for review.
+- Add transactions_r to the reference OAuth broker. Production broker deployment and Etsy reconnect are required before live order/address acceptance.
+
 ## 0.0.35-beta13
 
 - Recognize TikTok's updated United Kingdom (shop name) header switcher while continuing to reject other shops and ambiguous matches.
