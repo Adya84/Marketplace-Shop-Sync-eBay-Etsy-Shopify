@@ -111,6 +111,14 @@ class EtsyOAuthBroker:
                     "json": json_data,
                 },
             )
+            # Older deployed brokers expose read-only /get but not /request.
+            # A read may safely use that endpoint; never retry a write here.
+            if response.status_code==404 and method.upper()=='GET':
+                response=await client.post(
+                    f'{self.base_url}/api/etsy/api/get',
+                    json={'access_token':access_token,'broker_key':broker_key,
+                          'path':path,'params':params or {}},
+                )
             response.raise_for_status()
             if not response.content:
                 return {}
