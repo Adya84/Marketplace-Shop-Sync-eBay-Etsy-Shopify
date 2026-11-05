@@ -25,7 +25,7 @@ def test_receipt_builds_physical_etsy_order_without_tiktok_identity():
     assert payload['shippingLines'][0]['title']=='Etsy seller shipping'
 
 
-@pytest.mark.parametrize('change',[{'is_paid':False},{'is_shipped':True},{'status':'canceled'},{'refunds':[{}]}, {'first_line':''}])
+@pytest.mark.parametrize('change',[{'is_paid':False},{'is_shipped':True},{'status':'completed'},{'status':'shipped'},{'status':'canceled'},{'refunds':[{}]}, {'first_line':''}])
 def test_unsafe_receipts_cannot_create_orders(change):
     value=receipt();value.update(change)
     with pytest.raises(OrderProblem): parse_receipt(value,'12345',{'123:456':700}).validate()

@@ -16,7 +16,7 @@ def etsy_money(value):
 def parse_receipt(receipt,shop_id,weights):
     if receipt.get('is_paid') is not True or receipt.get('is_shipped') is not False:
         raise OrderProblem('Etsy order is not paid and unshipped')
-    if str(receipt.get('status','')).lower() in {'canceled','cancelled','refunded','fully_refunded'} or receipt.get('refunds') or receipt.get('shipments'):
+    if str(receipt.get('status','')).lower() in {'completed','shipped','canceled','cancelled','refunded','fully_refunded'} or receipt.get('refunds') or receipt.get('shipments'):
         raise OrderProblem('Etsy cancellation, refund or existing shipment requires review')
     name=unescape(str(receipt.get('name') or '')).strip().split(maxsplit=1)
     if not name: raise OrderProblem('Etsy shipping recipient is missing')
