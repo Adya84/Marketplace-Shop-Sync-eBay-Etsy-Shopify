@@ -9,7 +9,7 @@ from .workspace_navigation import workspace_navigation
 import re
 
 app=v7.app
-app.version='0.0.36-beta1'
+app.version='0.0.36-beta2'
 order_store=mount_orders(app,core,_shopify_client)
 etsy_order_store=mount_etsy_orders(app,core,_shopify_client)
 listing_store=mount_listings(app,core,_shopify_client)

@@ -1,3 +1,7 @@
+## 0.0.36-beta2
+
+- Support existing deployed Etsy sign-in brokers with the read-only API endpoint when the newer endpoint returns 404. This fixes reconnect shop discovery and receipt reads without retrying writes.
+
 ## 0.0.36-beta1
 
 - Add a separate Etsy order-import page, encrypted ledger and five-minute scheduler. Preview paid, unshipped physical UK GBP orders, enter variant weights, then import into Shopify with source-specific duplicate protection.
