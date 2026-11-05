@@ -53,7 +53,14 @@ async def list_receipts(client):
         for row in page:
             identity=str(row.get('receipt_id') or '')
             if not identity.isdigit() or identity in seen: raise OrderProblem('Etsy receipt pagination changed; retry scan')
-            seen.add(identity);rows.append(row)
+            seen.add(identity)
+            # Older OAuth brokers may return receipt history despite query filters.
+            # Filter before fetching details or asking for item weights.
+            if (row.get('is_paid') is True and row.get('is_shipped') is False
+                    and not row.get('shipments') and not row.get('refunds')
+                    and str(row.get('status','')).lower() not in
+                    {'completed','shipped','canceled','cancelled','refunded','fully_refunded'}):
+                rows.append(row)
         offset+=len(page)
         if offset>=int(payload.get('count',offset)): return rows
         if not page: raise OrderProblem('Etsy receipt pagination was incomplete')
