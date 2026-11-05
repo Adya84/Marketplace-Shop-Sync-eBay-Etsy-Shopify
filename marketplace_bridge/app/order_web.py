@@ -66,6 +66,7 @@ def mount_orders(app,core,client_factory):
     browser=TikTokBrowser(core.settings.data_dir/'tiktok-browser',store.settings,
                          lambda message:store.configure(last_message=message))
     csrf=secrets.token_urlsafe(32)
+    app.state.order_csrf=csrf
     instance=secrets.token_hex(16) # Public restart marker, never an authentication token.
     run_lock=asyncio.Lock()
     app.state.tiktok_browser=browser

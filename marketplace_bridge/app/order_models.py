@@ -36,13 +36,16 @@ class SourceOrder:
     tax: str = '0.00'
     delivery_instructions: str = ''
     email: str = ''
+    marketplace: str = 'TikTok'
 
     @property
     def amount(self):
         return money(self.total)
 
     def validate_identity(self):
-        if not re.fullmatch(r'\d{10,30}', self.order_id) or not re.fullmatch(r'\d{5,30}', self.shop_id):
+        minimum=1 if self.marketplace=='Etsy' else 10
+        shop_minimum=1 if self.marketplace=='Etsy' else 5
+        if self.marketplace not in {'TikTok','Etsy'} or not re.fullmatch(r'\d{%d,30}'%minimum, self.order_id) or not re.fullmatch(r'\d{%d,30}'%shop_minimum, self.shop_id):
             raise OrderProblem('Missing or invalid source shop/order identifier')
 
     def validate(self):
@@ -50,7 +53,7 @@ class SourceOrder:
         if self.status not in {'Awaiting packing', 'Awaiting shipment'} or not self.seller_fulfilled:
             raise OrderProblem('Order is not seller-fulfilled and ready to ship')
         if self.tracking:
-            raise OrderProblem('TikTok already has tracking; review before creating another shipment')
+            raise OrderProblem(self.marketplace+' already has tracking; review before creating another shipment')
         if self.currency != 'GBP':
             raise OrderProblem('Only verified UK GBP orders are supported')
         if self.email and (not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',self.email) or any(c in self.email for c in '*•…')):
