@@ -58,7 +58,7 @@ def build_order(source):
     if money(source.tax) != 0:
         raise OrderProblem('Non-zero marketplace tax requires review before import')
     def price(value): return {'shopMoney':{'amount':str(value),'currencyCode':source.currency}}
-    return {'order':{
+    result={'order':{
         'currency':source.currency,'financialStatus':'PAID',
         'sourceName':'Shop Sync '+source.marketplace,'sourceIdentifier':source.order_id,
         'sourceUrl':(f'https://www.etsy.com/your/orders/sold?order_id={source.order_id}' if source.marketplace=='Etsy' else f'https://seller-uk.tiktok.com/order/detail?order_no={source.order_id}&shop_region=GB'),
@@ -72,6 +72,13 @@ def build_order(source):
                       'weight':{'value':item['weight_grams'],'unit':'GRAMS'}} for item in source.items],
         'shippingLines':[{'title':source.marketplace+' seller shipping','priceSet':price(source.shipping)}],
     },'options':{'sendReceipt':False,'sendFulfillmentReceipt':False,'inventoryBehaviour':'BYPASS'}}
+    if source.import_discount:
+        result['order']['discountCode']={'itemFixedDiscountCode':{
+            'code':'TIKTOK-BUYER-ADJUSTMENT','amountSet':price(source.import_discount)}}
+        result['order']['note']+=('\nPostage import: customer-paid total GBP '+str(source.amount)+
+            '; buyer-side adjustment GBP '+str(source.import_discount)+
+            '. This is not a seller settlement; TikTok fees and funded promotions are settled separately.')
+    return result
 
 
 class OrderShopify:

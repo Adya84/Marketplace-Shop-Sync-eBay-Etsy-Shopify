@@ -271,6 +271,26 @@ def test_parse_visible_detail_preserves_address_and_items():
     assert order.items[0]['quantity']==1
     assert order.total=='6.99'
 
+
+def test_tiktok_discounted_paid_total_can_import_for_labels():
+    from app.order_shopify import build_order
+    detail=DETAIL.replace('£6.99 x 1','£11.53 x 2').replace('£6.99','£23.06')
+    detail=detail.replace('Total\n£23.06','Total\n£21.52')
+    order=parse_detail(detail,'7496165985360775303','576970938340776741',{'1729826906594384007':200})
+    payload=build_order(order)['order']
+    assert order.total=='21.52'
+    assert payload['lineItems'][0]['quantity']==2
+    assert payload['lineItems'][0]['priceSet']['shopMoney']['amount']=='11.53'
+    assert payload['discountCode']['itemFixedDiscountCode']['amountSet']['shopMoney']['amount']=='1.54'
+    assert 'not a seller settlement' in payload['note']
+
+
+def test_tiktok_incomplete_item_subtotal_is_still_rejected():
+    with pytest.raises(OrderProblem,match='subtotal'):
+        parse_detail(DETAIL.replace('Item(s) subtotal after discounts\n£6.99',
+            'Item(s) subtotal after discounts\n£12.99'),
+            '7496165985360775303','576970938340776741',{'1729826906594384007':200})
+
 def test_optional_seller_sku_preserves_title_variant_price_and_source_sku():
     detail=DETAIL.replace('Square 100mm\n£6.99','Square 100mm\nSeller SKU: slate-square\n£6.99')
     order=parse_detail(detail,'7496165985360775303','576970938340776741',{'1729826906594384007':200})
@@ -310,8 +330,8 @@ def test_flat_and_street_are_never_split_into_a_guessed_town():
     assert order.address['city']=='Glasgow'
 
 def test_discount_mismatch_does_not_invent_allocation():
-    order=parse_detail(DETAIL.replace('£6.99 x 1','£7.99 x 1'),'7496165985360775303','576970938340776741',{'1729826906594384007':200})
-    with pytest.raises(OrderProblem): order.validate()
+    with pytest.raises(OrderProblem):
+        parse_detail(DETAIL.replace('£6.99 x 1','£7.99 x 1'),'7496165985360775303','576970938340776741',{'1729826906594384007':200})
 
 def test_tracking_panel_requires_unique_values():
     assert parse_tracking('Basic info\nTracking ID\nTEST123\nShipping provider\nRoyal Mail\nDelivery option')=={'number':'TEST123','carrier':'Royal Mail'}

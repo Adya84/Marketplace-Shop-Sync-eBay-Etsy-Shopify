@@ -7,7 +7,7 @@ import re
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
-from .order_models import SourceOrder, OrderProblem, SignInRequired
+from .order_models import SourceOrder, OrderProblem, SignInRequired, money
 
 ORIGIN='https://seller-uk.tiktok.com'
 
@@ -101,6 +101,8 @@ def parse_detail(text,shop_id,order_id,weights):
         items.append({'sku':sku,'title':item[0],'variant':item[1] if len(item)==3 else '',
                       'unit_price':price[1].replace(',',''),'quantity':int(price[2]),'weight_grams':weights.get(sku)})
         pos=end
+    if sum((money(i['unit_price'])*i['quantity'] for i in items),money('0.00')) != money(amount('Item(s) subtotal after discounts')):
+        raise OrderProblem('Source item subtotal does not match the visible items; review before importing')
     parcel=[re.match(r'(\d+) parcels?(?:, \d+ items? included)?$',v) for v in values]
     parcel=[m[1] for m in parcel if m]
     if parcel!=['1']: raise OrderProblem('Multiple or unknown parcels require review')
