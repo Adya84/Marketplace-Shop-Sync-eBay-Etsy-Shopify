@@ -44,6 +44,8 @@ def test_etsy_preview_import_reconcile_and_separate_ledger(tmp_path,monkeypatch)
         assert client.post('/orders/etsy/import',headers=headers).status_code==400
         settings=dict(enabled=False,weights={'123:456':700},target_shop='test.myshopify.com')
         assert client.post('/orders/etsy/settings',json=settings,headers=headers).status_code==200
+        reopened=web.OrderStore(core.settings.data_dir/'etsy-orders.db',core.secrets)
+        assert reopened.settings()['weights']=={'123:456':700}
         assert client.post('/orders/etsy/scan',headers=headers).status_code==200
         assert finished.wait(3);finished.clear()
         assert created==[]

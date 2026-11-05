@@ -42,6 +42,13 @@ class SourceOrder:
     def amount(self):
         return money(self.total)
 
+    @property
+    def import_discount(self):
+        """Buyer-side adjustment for postage imports, never inferred seller fees."""
+        if self.marketplace!='TikTok': return Decimal('0.00')
+        return max(Decimal('0.00'),sum((money(i['unit_price'])*i['quantity'] for i in self.items),Decimal('0.00'))
+                   +money(self.shipping)+money(self.tax)-self.amount)
+
     def validate_identity(self):
         minimum=1 if self.marketplace=='Etsy' else 10
         shop_minimum=1 if self.marketplace=='Etsy' else 5
@@ -76,7 +83,12 @@ class SourceOrder:
             if type(weight) is not int or not 1 <= weight <= 100000:
                 raise OrderProblem('Item weight is missing; enter its actual weight for labels')
             subtotal += money(item.get('unit_price')) * qty
-        if subtotal + money(self.shipping) + money(self.tax) != self.amount:
+        expected=subtotal + money(self.shipping) + money(self.tax)
+        # TikTok's paid total can include buyer promotions not reflected in
+        # displayed unit prices. Preserve prices and apply an order discount.
+        discounted=(self.marketplace=='TikTok' and
+                    money(self.shipping)+money(self.tax)<=self.amount<expected)
+        if expected != self.amount and not discounted:
             raise OrderProblem('Source item, shipping and tax amounts do not equal the paid total')
 
     def payload(self):

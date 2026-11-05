@@ -25,6 +25,12 @@ def test_valid_order_preserves_source_money():
     assert order.amount == Decimal('6.99')
 
 
+def test_buyer_discount_does_not_relax_etsy_or_allow_shipping_underpayment():
+    assert sample(total='0.00').validate() is None
+    with pytest.raises(OrderProblem): sample(total='5.00',marketplace='Etsy').validate()
+    with pytest.raises(OrderProblem): sample(total='1.00',shipping='2.00').validate()
+
+
 @pytest.mark.parametrize('field,value', [('zip','G5* ***'), ('address1','1 *** Road'), ('city','')])
 def test_masked_or_incomplete_address_stops_import(field, value):
     order=sample(); order.address[field]=value
