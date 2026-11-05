@@ -16,7 +16,7 @@ def etsy_money(value):
 def parse_receipt(receipt,shop_id,weights):
     if receipt.get('is_paid') is not True or receipt.get('is_shipped') is not False:
         raise OrderProblem('Etsy order is not paid and unshipped')
-    if str(receipt.get('status','')).lower() in {'canceled','cancelled','refunded','fully_refunded'} or receipt.get('refunds') or receipt.get('shipments'):
+    if str(receipt.get('status','')).lower() in {'completed','shipped','canceled','cancelled','refunded','fully_refunded'} or receipt.get('refunds') or receipt.get('shipments'):
         raise OrderProblem('Etsy cancellation, refund or existing shipment requires review')
     name=unescape(str(receipt.get('name') or '')).strip().split(maxsplit=1)
     if not name: raise OrderProblem('Etsy shipping recipient is missing')
@@ -53,7 +53,14 @@ async def list_receipts(client):
         for row in page:
             identity=str(row.get('receipt_id') or '')
             if not identity.isdigit() or identity in seen: raise OrderProblem('Etsy receipt pagination changed; retry scan')
-            seen.add(identity);rows.append(row)
+            seen.add(identity)
+            # Older OAuth brokers may return receipt history despite query filters.
+            # Filter before fetching details or asking for item weights.
+            if (row.get('is_paid') is True and row.get('is_shipped') is False
+                    and not row.get('shipments') and not row.get('refunds')
+                    and str(row.get('status','')).lower() not in
+                    {'completed','shipped','canceled','cancelled','refunded','fully_refunded'}):
+                rows.append(row)
         offset+=len(page)
         if offset>=int(payload.get('count',offset)): return rows
         if not page: raise OrderProblem('Etsy receipt pagination was incomplete')

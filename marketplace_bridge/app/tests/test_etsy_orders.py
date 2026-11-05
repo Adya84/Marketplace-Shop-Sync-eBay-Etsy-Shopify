@@ -25,7 +25,7 @@ def test_receipt_builds_physical_etsy_order_without_tiktok_identity():
     assert payload['shippingLines'][0]['title']=='Etsy seller shipping'
 
 
-@pytest.mark.parametrize('change',[{'is_paid':False},{'is_shipped':True},{'status':'canceled'},{'refunds':[{}]}, {'first_line':''}])
+@pytest.mark.parametrize('change',[{'is_paid':False},{'is_shipped':True},{'status':'completed'},{'status':'shipped'},{'status':'canceled'},{'refunds':[{}]}, {'first_line':''}])
 def test_unsafe_receipts_cannot_create_orders(change):
     value=receipt();value.update(change)
     with pytest.raises(OrderProblem): parse_receipt(value,'12345',{'123:456':700}).validate()
@@ -55,7 +55,7 @@ async def test_receipts_paginate_paid_unshipped_only():
         async def _get(self,path,params):
             assert path.endswith('/receipts')
             assert params['was_paid']=='true' and params['was_shipped']=='false'
-            return {'count':2,'results':[{'receipt_id':1 if params['offset']==0 else 2}]}
+            return {'count':2,'results':[{'receipt_id':1 if params['offset']==0 else 2,'is_paid':True,'is_shipped':False}]}
     assert [x['receipt_id'] for x in await list_receipts(Client())]==[1,2]
 
 
@@ -67,3 +67,30 @@ async def test_etsy_lookup_cannot_link_same_number_from_tiktok():
             assert variables['query']=='tag:"EtsyOrderID:1234567890"'
             return {'orders':{'nodes':[{'id':'gid://shopify/Order/1','tags':['TikTokOrderID:1234567890']}], 'pageInfo':{'hasNextPage':False}}}
     assert await OrderShopify(Client(),'Etsy').find('1234567890') is None
+
+
+@pytest.mark.asyncio
+async def test_queue_locally_excludes_shipped_tracked_and_unpaid_even_if_api_ignores_filters():
+    class Client:
+        shop_id='12345'
+        async def _get(self,path,params):
+            return {'count':4,'results':[
+                {'receipt_id':1,'is_paid':True,'is_shipped':False,'shipments':[]},
+                {'receipt_id':2,'is_paid':True,'is_shipped':True},
+                {'receipt_id':3,'is_paid':True,'is_shipped':False,'shipments':[{'tracking_code':'sent'}]},
+                {'receipt_id':4,'is_paid':False,'is_shipped':False}]}
+    assert [x['receipt_id'] for x in await list_receipts(Client())]==[1]
+
+
+@pytest.mark.asyncio
+async def test_filtered_history_does_not_hide_later_open_receipts():
+    class Client:
+        shop_id='12345'
+        async def _get(self,path,params):
+            if params['offset']==0:
+                return {'count':3,'results':[
+                    {'receipt_id':1,'is_paid':True,'is_shipped':True},
+                    {'receipt_id':2,'is_paid':True,'is_shipped':False,'status':'completed'}]}
+            assert params['offset']==2
+            return {'count':3,'results':[{'receipt_id':3,'is_paid':True,'is_shipped':False}]}
+    assert [x['receipt_id'] for x in await list_receipts(Client())]==[3]
