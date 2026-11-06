@@ -37,6 +37,37 @@ def test_unknown_weight_or_unreconciled_discount_requires_review():
     with pytest.raises(OrderProblem,match='equal'):parse_receipt(value,'12345',{'123:456':700}).validate()
 
 
+def test_etsy_reported_coupon_preserves_prices_and_paid_total():
+    value=receipt();value['discount_amt']=dict(value['grandtotal'],amount=200)
+    value['grandtotal']['amount']=1099
+    order=parse_receipt(value,'12345',{'123:456':700})
+    payload=build_order(order)['order']
+    assert str(order.import_discount)=='2.00'
+    assert payload['lineItems'][0]['priceSet']['shopMoney']['amount']=='10.99'
+    assert payload['discountCode']['itemFixedDiscountCode']['amountSet']['shopMoney']['amount']=='2.00'
+    assert payload['discountCode']['itemFixedDiscountCode']['code']=='ETSY-BUYER-ADJUSTMENT'
+    assert order.total=='10.99'
+
+
+def test_etsy_tax_and_coupon_are_preserved_without_guessing_liability():
+    value=receipt();value['discount_amt']=dict(value['grandtotal'],amount=200)
+    value['total_vat_cost']['amount']=180
+    value['total_tax_cost']['amount']=20
+    order=parse_receipt(value,'12345',{'123:456':700})
+    payload=build_order(order)['order']
+    assert order.total=='12.99' and order.tax=='2.00'
+    assert payload['taxLines'][0]['priceSet']['shopMoney']['amount']=='2.00'
+    assert payload['taxLines'][0]['channelLiable'] is None
+    assert payload['lineItems'][0]['taxable'] is True
+    assert payload['lineItems'][0]['weight']['value']==700
+
+
+def test_etsy_wrong_reported_discount_still_requires_review():
+    value=receipt();value['discount_amt']=dict(value['grandtotal'],amount=500)
+    with pytest.raises(OrderProblem):
+        build_order(parse_receipt(value,'12345',{'123:456':700}))
+
+
 @pytest.mark.parametrize('change',[
     lambda r:r['transactions'][0].update(is_digital=True),
     lambda r:r['grandtotal'].update(currency_code='USD'),

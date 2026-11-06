@@ -37,6 +37,7 @@ class SourceOrder:
     delivery_instructions: str = ''
     email: str = ''
     marketplace: str = 'TikTok'
+    discount: str = '0.00'
 
     @property
     def amount(self):
@@ -45,7 +46,7 @@ class SourceOrder:
     @property
     def import_discount(self):
         """Buyer-side adjustment for postage imports, never inferred seller fees."""
-        if self.marketplace!='TikTok': return Decimal('0.00')
+        if self.marketplace!='TikTok': return money(self.discount)
         return max(Decimal('0.00'),sum((money(i['unit_price'])*i['quantity'] for i in self.items),Decimal('0.00'))
                    +money(self.shipping)+money(self.tax)-self.amount)
 
@@ -88,7 +89,10 @@ class SourceOrder:
         # displayed unit prices. Preserve prices and apply an order discount.
         discounted=(self.marketplace=='TikTok' and
                     money(self.shipping)+money(self.tax)<=self.amount<expected)
-        if expected != self.amount and not discounted:
+        declared_discount=money(self.discount)
+        if declared_discount>subtotal:
+            raise OrderProblem('Source discount exceeds the item subtotal')
+        if expected-declared_discount != self.amount and not discounted:
             raise OrderProblem('Source item, shipping and tax amounts do not equal the paid total')
 
     def payload(self):

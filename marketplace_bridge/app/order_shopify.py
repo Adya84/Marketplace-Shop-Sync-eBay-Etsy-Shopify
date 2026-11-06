@@ -55,7 +55,7 @@ def verify_shipping_address(address,expected=None):
 
 def build_order(source):
     source.validate()
-    if money(source.tax) != 0:
+    if money(source.tax) != 0 and source.marketplace!='Etsy':
         raise OrderProblem('Non-zero marketplace tax requires review before import')
     def price(value): return {'shopMoney':{'amount':str(value),'currencyCode':source.currency}}
     result={'order':{
@@ -74,10 +74,17 @@ def build_order(source):
     },'options':{'sendReceipt':False,'sendFulfillmentReceipt':False,'inventoryBehaviour':'BYPASS'}}
     if source.import_discount:
         result['order']['discountCode']={'itemFixedDiscountCode':{
-            'code':'TIKTOK-BUYER-ADJUSTMENT','amountSet':price(source.import_discount)}}
+            'code':source.marketplace.upper()+'-BUYER-ADJUSTMENT','amountSet':price(source.import_discount)}}
         result['order']['note']+=('\nPostage import: customer-paid total GBP '+str(source.amount)+
             '; buyer-side adjustment GBP '+str(source.import_discount)+
-            '. This is not a seller settlement; TikTok fees and funded promotions are settled separately.')
+            '. This is not a seller settlement; marketplace fees and funded promotions are settled separately.')
+    if money(source.tax):
+        base=sum((money(item['unit_price'])*item['quantity'] for item in source.items),money('0.00'))-source.import_discount
+        if base<=0: raise OrderProblem('Etsy tax has no merchandise base; review before import')
+        result['order']['taxLines']=[{'title':'Etsy reported tax/VAT',
+            'priceSet':price(source.tax),'rate':str(money(source.tax)/base),'channelLiable':None}]
+        for item in result['order']['lineItems']: item['taxable']=True
+        result['order']['note']+='\nEtsy reported tax/VAT GBP '+source.tax+'. Imported aggregate amount; remittance liability is not inferred.'
     return result
 
 
