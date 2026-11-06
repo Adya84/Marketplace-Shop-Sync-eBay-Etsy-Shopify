@@ -46,6 +46,29 @@ def test_wait_detects_login_redirect_without_waiting_for_timeout():
     with pytest.raises(OrderProblem,match='sign-in expired'):
         browser.wait(lambda:False)
 
+
+def test_wait_allows_shop_header_to_finish_rendering_but_rejects_wrong_shop():
+    from app.order_browser import TikTokBrowser
+    class Button:
+        text='United Kingdom (Graffidoodle)'
+        def is_displayed(self): return True
+        def find_elements(self,*_): return []
+    button=Button()
+    class Header:
+        def find_elements(self,*_):return [button]
+    class Driver:
+        current_url='https://seller-uk.tiktok.com/order'
+        reads=0
+        def find_elements(self,*_):
+            self.reads+=1
+            return [] if self.reads==1 else [Header()]
+    browser=TikTokBrowser('saved-profile',lambda:dict(shop_name='Graffidoodle',shop_id='7496165985360775303'))
+    browser.driver=Driver()
+    assert browser.wait(lambda:browser.guard() is None)
+    button.text='United Kingdom (Other shop)'
+    with pytest.raises(OrderProblem,match='identity requires review'):
+        browser.wait(lambda:browser.guard() is None)
+
 @pytest.mark.parametrize('message,expected',[
     ('unknown error: net::ERR_CONNECTION_RESET private-token','ERR_CONNECTION_RESET'),
     ('invalid session id private-token','session disconnected'),
