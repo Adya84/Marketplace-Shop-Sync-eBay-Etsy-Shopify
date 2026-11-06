@@ -32,10 +32,13 @@ def parse_receipt(receipt,shop_id,weights):
     tax=Decimal('0')
     for field in ('total_tax_cost','total_vat_cost'):
         if receipt.get(field) is not None: tax+=etsy_money(receipt[field])
-    if tax: raise OrderProblem('Etsy tax/VAT requires review before import')
+    discount=etsy_money(receipt['discount_amt']) if receipt.get('discount_amt') is not None else Decimal('0.00')
+    if receipt.get('gift_wrap_price') is not None and etsy_money(receipt['gift_wrap_price']):
+        raise OrderProblem('Etsy gift wrapping charge requires review before import')
     return SourceOrder(shop_id=str(shop_id),order_id=str(receipt.get('receipt_id') or ''),marketplace='Etsy',
         status='Awaiting shipment',currency='GBP',total=str(etsy_money(receipt.get('grandtotal'))),
-        shipping=str(etsy_money(receipt.get('total_shipping_cost'))),tax='0.00',seller_fulfilled=True,
+        shipping=str(etsy_money(receipt.get('total_shipping_cost'))),tax=str(tax.quantize(Decimal('.01'))),
+        discount=str(discount.quantize(Decimal('.01'))),seller_fulfilled=True,
         address=dict(firstName=name[0],lastName=name[1] if len(name)>1 else '',
             address1=unescape(str(receipt.get('first_line') or '')),address2=unescape(str(receipt.get('second_line') or '')),
             city=unescape(str(receipt.get('city') or '')),province=unescape(str(receipt.get('state') or '')),
