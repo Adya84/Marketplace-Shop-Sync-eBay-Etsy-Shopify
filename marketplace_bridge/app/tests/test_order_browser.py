@@ -90,6 +90,7 @@ def test_start_reopens_dead_session_with_same_profile(monkeypatch,transport):
         def get(self,url): calls.append('loaded')
     fresh=Fresh()
     def create(**kwargs):
+        assert kwargs['options'].page_load_strategy=='eager'
         assert '--user-data-dir=saved-profile' in kwargs['options'].arguments
         assert kwargs['service'].path=='/usr/local/bin/shop-sync-chromedriver'
         assert kwargs['options'].binary_location=='/usr/bin/chromium-browser'
@@ -101,6 +102,31 @@ def test_start_reopens_dead_session_with_same_profile(monkeypatch,transport):
     browser.start()
     assert calls == ['quit','created','loaded']
     assert browser.driver is fresh
+
+
+@pytest.mark.parametrize('permanent',[False,True])
+def test_timeout_stops_stalled_load_before_retry_without_losing_profile(monkeypatch,permanent):
+    from selenium.common.exceptions import TimeoutException
+    from app.order_browser import TikTokBrowser, ORIGIN
+    import app.order_browser as module
+    calls=[]
+    class Driver:
+        def get(self,url):
+            calls.append('get')
+            if permanent or calls.count('get')==1: raise TimeoutException('private page info')
+        def execute_script(self,script):
+            assert script=='window.stop();'
+            calls.append('stop')
+    browser=TikTokBrowser('saved-profile',lambda:{});driver=Driver();browser.driver=driver
+    monkeypatch.setattr(module.time,'sleep',lambda _:None)
+    if permanent:
+        with pytest.raises(OrderProblem,match='after 3 attempts'):
+            browser.navigate(ORIGIN+'/homepage')
+        assert calls==['get','stop']*3
+    else:
+        browser.navigate(ORIGIN+'/homepage')
+        assert calls==['get','stop','get']
+    assert browser.driver is driver
 
 @pytest.mark.parametrize('count',[0,1])
 @pytest.mark.parametrize('redraw',[False,True])

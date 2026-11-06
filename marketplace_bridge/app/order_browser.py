@@ -184,6 +184,12 @@ class TikTokBrowser:
                     'ERR_HTTP_RESPONSE_CODE_FAILURE'}
                 if not retryable and not isinstance(exc,TimeoutException): raise
                 reason=code[1] if retryable else 'page-load timeout'
+                if isinstance(exc,TimeoutException):
+                    # Release the stalled navigation before another read-only
+                    # load. Keep the same browser/profile and saved sign-in.
+                    try: self.driver.execute_script('window.stop();')
+                    except WebDriverException:
+                        raise OrderProblem('TikTok timed-out page could not be stopped; next check will retry the browser connection.') from None
                 if attempt==2:
                     raise OrderProblem(f'TikTok page load failed after 3 attempts ({reason}); next check will retry.') from None
                 self.report(f'TikTok page load failed ({reason}); retrying {attempt+2} of 3…')
@@ -221,6 +227,9 @@ class TikTokBrowser:
             from selenium import webdriver
             from selenium.webdriver.chrome.service import Service
             options=webdriver.ChromeOptions()
+            # TikTok is an SPA; our explicit content checks wait for order data.
+            # Do not wait for every image/analytics resource before those checks.
+            options.page_load_strategy='eager'
             options.binary_location='/usr/bin/chromium-browser'
             options.add_argument('--user-data-dir='+self.profile)
             options.add_argument('--window-size=1280,900')
