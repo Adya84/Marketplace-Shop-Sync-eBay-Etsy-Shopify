@@ -11,6 +11,11 @@ from .order_models import SourceOrder, OrderProblem, SignInRequired, money
 
 ORIGIN='https://seller-uk.tiktok.com'
 
+
+class ShopHeaderLoading(OrderProblem):
+    """The SPA has not rendered its identity control yet."""
+    pass
+
 def browser_failure(exc):
     """Only static categories reach status text, never raw driver messages."""
     from selenium.common.exceptions import WebDriverException
@@ -184,6 +189,12 @@ class TikTokBrowser:
                     'ERR_HTTP_RESPONSE_CODE_FAILURE'}
                 if not retryable and not isinstance(exc,TimeoutException): raise
                 reason=code[1] if retryable else 'page-load timeout'
+                if isinstance(exc,TimeoutException):
+                    # Release the stalled navigation before another read-only
+                    # load. Keep the same browser/profile and saved sign-in.
+                    try: self.driver.execute_script('window.stop();')
+                    except WebDriverException:
+                        raise OrderProblem('TikTok timed-out page could not be stopped; next check will retry the browser connection.') from None
                 if attempt==2:
                     raise OrderProblem(f'TikTok page load failed after 3 attempts ({reason}); next check will retry.') from None
                 self.report(f'TikTok page load failed ({reason}); retrying {attempt+2} of 3…')
@@ -221,6 +232,9 @@ class TikTokBrowser:
             from selenium import webdriver
             from selenium.webdriver.chrome.service import Service
             options=webdriver.ChromeOptions()
+            # TikTok is an SPA; our explicit content checks wait for order data.
+            # Do not wait for every image/analytics resource before those checks.
+            options.page_load_strategy='eager'
             options.binary_location='/usr/bin/chromium-browser'
             options.add_argument('--user-data-dir='+self.profile)
             options.add_argument('--window-size=1280,900')
@@ -240,7 +254,8 @@ class TikTokBrowser:
         from selenium.webdriver.support.ui import WebDriverWait
         def ready(_):
             self.check_login()
-            return fn()
+            try: return fn()
+            except ShopHeaderLoading: return False
         return WebDriverWait(self.driver,30).until(ready)
 
     def check_login(self):
@@ -272,15 +287,18 @@ class TikTokBrowser:
         banner=self.driver.find_elements(By.CSS_SELECTOR,'header, [role=banner]')
         # TikTok's newer UK switcher uses a country/shop label instead of a
         # shop-logo image. Match that complete label, never a name substring.
-        found=[]
+        found=[];switcher_visible=False
         for region in banner:
             for e in region.find_elements(By.CSS_SELECTOR,'button, [role=button]'):
                 if not e.is_displayed(): continue
                 label=' '.join(e.text.split())
+                if re.fullmatch(r'(?:GB )?United Kingdom \(.+\)',label): switcher_visible=True
                 current=label in {f'United Kingdom ({name})',f'GB United Kingdom ({name})'}
                 legacy=label==name and any(i.get_attribute('alt')==name for i in e.find_elements(By.CSS_SELECTOR,'img'))
                 if current or legacy:
                     if e not in found: found.append(e)
+        if not found and not switcher_visible:
+            raise ShopHeaderLoading('TikTok login/shop identity requires review')
         if len(found)!=1: raise OrderProblem('TikTok login/shop identity requires review')
 
     def main_text(self):
@@ -336,7 +354,7 @@ class TikTokBrowser:
             self.navigate(ORIGIN+'/order?order_status[]=1&selected_sort=1&shop_region=GB&tab=to_ship')
             self.check_login()
             self.wait(lambda:bool(self.driver.find_elements(By.CSS_SELECTOR,'[role=tab]')))
-            self.guard()
+            self.wait(lambda:self.guard() is None)
             # Home link can retain saved filters. Refuse filtered results until reset.
             tabs=[e for e in self.driver.find_elements(By.CSS_SELECTOR,'[role=tab]') if re.fullmatch(r'To ship\s*\d*',e.text.strip())]
             if len(tabs)!=1: raise OrderProblem('To ship tab could not be verified')
