@@ -334,6 +334,21 @@ def test_tiktok_discounted_paid_total_can_import_for_labels():
     assert 'not a seller settlement' in payload['note']
 
 
+@pytest.mark.parametrize('quantity,unit,subtotal,adjusted',[
+    (3,'12.32','36.97','12.33'),
+    (2,'12.00','24.01','12.01'),
+])
+def test_tiktok_rounded_unit_price_preserves_paid_total(quantity,unit,subtotal,adjusted):
+    from app.order_shopify import build_order
+    detail=DETAIL.replace('1 item included',f'{quantity} items included')
+    detail=detail.replace('£6.99 x 1',f'£{unit} x {quantity}').replace('£6.99',f'£{subtotal}')
+    source=parse_detail(detail,'7496165985360775303','576970938340776741',{'1729826906594384007':200})
+    items=build_order(source)['order']['lineItems']
+    assert [(item['quantity'],item['priceSet']['shopMoney']['amount']) for item in items]==[(quantity-1,unit),(1,adjusted)]
+    assert all(item['weight']['value']==200 for item in items)
+    assert source.total==subtotal
+
+
 def test_tiktok_incomplete_item_subtotal_is_still_rejected():
     with pytest.raises(OrderProblem,match='subtotal'):
         parse_detail(DETAIL.replace('Item(s) subtotal after discounts\n£6.99',

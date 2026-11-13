@@ -106,8 +106,22 @@ def parse_detail(text,shop_id,order_id,weights):
         items.append({'sku':sku,'title':item[0],'variant':item[1] if len(item)==3 else '',
                       'unit_price':price[1].replace(',',''),'quantity':int(price[2]),'weight_grams':weights.get(sku)})
         pos=end
-    if sum((money(i['unit_price'])*i['quantity'] for i in items),money('0.00')) != money(amount('Item(s) subtotal after discounts')):
-        raise OrderProblem('Source item subtotal does not match the visible items; review before importing')
+    subtotal = money(amount('Item(s) subtotal after discounts'))
+    visible_total = sum((money(item['unit_price']) * item['quantity'] for item in items), money('0.00'))
+    if subtotal != visible_total:
+        # TikTok can round the displayed unit price while retaining the exact
+        # subtotal. For a single SKU, use that penny on one unit of the same item.
+        difference = subtotal - visible_total
+        counts = [int(match[1]) for value in values
+                  if (match := re.fullmatch(r'(?:1 parcel,\s*)?(\d+) items? included', value))]
+        if (len(items) != 1 or items[0]['quantity'] < 2 or counts != [items[0]['quantity']]
+                or abs(difference) != money('0.01')
+                or money(items[0]['unit_price']) + difference < 0):
+            raise OrderProblem('Source item subtotal does not match the visible items; review before importing')
+        item = items[0]
+        adjusted_price = money(item['unit_price']) + difference
+        items = [dict(item, quantity=item['quantity'] - 1),
+                 dict(item, quantity=1, unit_price=str(adjusted_price))]
     parcel=[re.match(r'(\d+) parcels?(?:, \d+ items? included)?$',v) for v in values]
     parcel=[m[1] for m in parcel if m]
     if parcel!=['1']: raise OrderProblem('Multiple or unknown parcels require review')
