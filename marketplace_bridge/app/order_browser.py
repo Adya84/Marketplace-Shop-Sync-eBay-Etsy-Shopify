@@ -256,6 +256,7 @@ class TikTokBrowser:
             options.add_argument('--window-size=1280,900')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--no-first-run')
+            options.add_argument('--hide-crash-restore-bubble')
             options.add_argument('--restore-last-session')
             env={**os.environ,'DISPLAY':self.display} if self.display else None
             self.driver=webdriver.Chrome(service=Service('/usr/local/bin/shop-sync-chromedriver',env=env),options=options)
@@ -363,8 +364,7 @@ class TikTokBrowser:
         if len(packing)!=1: raise OrderProblem('Awaiting packing filter could not be verified')
         return packing[0]
 
-    def _scan_ids(self, tracking_order_id=None):
-        from selenium.common.exceptions import TimeoutException
+    def _scan_ids(self):
         from selenium.webdriver.common.by import By
         with self.lock:
             # Use the observed Seller Centre queue URL. Home-page card labels
@@ -412,28 +412,6 @@ class TikTokBrowser:
             for _ in range(500):
                 # Wrap empty pages so WebDriverWait does not treat [] as loading.
                 ids=self.wait(ready_page)[0]
-                if tracking_order_id in ids:
-                    for link in self.driver.find_elements(By.CSS_SELECTOR,'a[href*="/order/detail?order_no="]'):
-                        if not link.is_displayed(): continue
-                        if parse_qs(urlparse(link.get_attribute('href')).query).get('order_no') != [tracking_order_id]:
-                            continue
-                        row=link.find_element(By.XPATH,'ancestor::tr[1]')
-                        if 'Shipped from seller' not in lines(row.text):
-                            raise OrderProblem('TikTok row is not seller shipped')
-                        from selenium.webdriver.common.action_chains import ActionChains
-                        ActionChains(self.driver).move_to_element(row).perform()
-                        try:
-                            buttons=self.wait(lambda:[element for element in row.find_elements(By.XPATH,
-                                ".//*[self::button or @role='button' or self::a][normalize-space(.)='Add tracking info']")
-                                if element.is_displayed()])
-                        except TimeoutException:
-                            raise OrderProblem('TikTok did not show Add tracking info on the matching order row') from None
-                        if len(buttons)!=1:
-                            raise OrderProblem('Add tracking info action could not be verified')
-                        handles=set(self.driver.window_handles)
-                        buttons[0].click()
-                        return handles
-                    raise OrderProblem('Tracking order row could not be verified')
                 if not ids and expected_count==0: return []
                 signature=tuple(ids)
                 if signature in seen: raise OrderProblem('Order pagination repeated; scan incomplete')
@@ -451,6 +429,72 @@ class TikTokBrowser:
                 self.wait(changed_page)
             raise OrderProblem('Order pagination limit reached; scan incomplete')
 
+    def open_tracking_form(self, order_id):
+        from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
+        from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.common.keys import Keys
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        self.navigate(ORIGIN+'/order?selected_sort=1&shop_region=GB&tab=to_ship')
+        wait = WebDriverWait(self.driver, 8, ignored_exceptions=(StaleElementReferenceException, ShopHeaderLoading))
+
+        def search_input(_):
+            self.guard()
+            fields = [field for field in self.driver.find_elements(
+                By.CSS_SELECTOR, 'input[placeholder^="Search order ID"]') if field.is_displayed()]
+            if len(fields) > 1:
+                raise OrderProblem('TikTok order search is ambiguous')
+            return fields[0] if fields else False
+
+        def matching_row(_):
+            self.guard()
+            rows = []
+            for link in self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/order/detail?order_no="]'):
+                if not link.is_displayed():
+                    continue
+                if parse_qs(urlparse(link.get_attribute('href')).query).get('order_no') != [order_id]:
+                    continue
+                row = link.find_element(By.XPATH, 'ancestor::tr[1]')
+                if row not in rows:
+                    rows.append(row)
+            if len(rows) > 1:
+                raise OrderProblem('TikTok search returned more than one row for this order')
+            return rows[0] if rows else False
+
+        stage = 'show the order search field'
+        try:
+            # Reuse the current Seller Centre controls and search by the exact order ID.
+            field = wait.until(search_input)
+            field.clear()
+            field.send_keys(order_id, Keys.ENTER)
+            stage = 'find the exact order'
+            row = wait.until(matching_row)
+            row_lines = lines(row.text)
+            if 'Awaiting packing' not in row_lines or 'Shipped from seller' not in row_lines:
+                raise OrderProblem('TikTok order is not seller shipped and awaiting packing')
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", row)
+            ActionChains(self.driver).move_to_element(row).perform()
+
+            def tracking_action(driver):
+                current = matching_row(driver)
+                if not current:
+                    return False
+                matches = [element for element in current.find_elements(By.XPATH,
+                    ".//*[normalize-space(.)='Add tracking info' and not(.//*[normalize-space(.)='Add tracking info'])]")
+                    if element.is_displayed()]
+                if len(matches) > 1:
+                    raise OrderProblem('TikTok showed multiple tracking actions for this order')
+                return matches[0] if matches else False
+
+            stage = 'show Add tracking info on the exact order row'
+            action = wait.until(tracking_action)
+            handles = set(self.driver.window_handles)
+            action.click()
+            return handles
+        except TimeoutException:
+            raise OrderProblem(f'TikTok did not {stage}') from None
+
     def submit_tracking(self,order_id,carrier,number,*,before_submit):
         from selenium.webdriver.common.by import By
 
@@ -463,9 +507,7 @@ class TikTokBrowser:
             order.validate()
             if order.status!='Awaiting packing' or not re.fullmatch(r'[A-Za-z0-9._/-]{4,50}',number):
                 raise OrderProblem('Order or tracking number is not eligible for submission')
-            handles=self._scan_ids(tracking_order_id=order_id)
-            if not isinstance(handles,set):
-                raise OrderProblem('Order was not found in Awaiting packing')
+            handles=self.open_tracking_form(order_id)
             original=self.order_window
 
             def form_ready():
