@@ -7,6 +7,80 @@ from app.order_web import mount_orders
 from app.security import SecretBox
 
 
+def test_tracking_checks_fulfilled_shopify_orders_during_import_scan(tmp_path,monkeypatch):
+    from threading import Event
+    import app.order_web as web
+    from app.order_store import OrderStore
+    from app.tests.test_orders import sample
+
+    monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
+    monkeypatch.setattr(web,'TRACKING_POLL_SECONDS',0.02)
+    scan_started,release_scan,tracking_sent,hidden_ready=Event(),Event(),Event(),Event()
+    order=sample()
+    shopify_id='gid://shopify/Order/123'
+    domain='example.myshopify.com'
+    expected={'carrier':'Royal Mail','number':'AB123456789GB'}
+
+    class Browser:
+        def __init__(self,profile,*args,display=None):
+            self.profile=profile.name
+            self.display=display
+
+        def start(self): pass
+        def close(self): pass
+
+        def scan_ids(self):
+            assert self.profile=='tiktok-browser'
+            scan_started.set()
+            assert release_scan.wait(5)
+            return []
+
+        def detail(self,source_id):
+            assert self.profile=='tiktok-tracking-browser' and self.display==':100'
+            assert source_id==order.order_id
+            return order
+
+        def submit_tracking(self,source_id,carrier,number):
+            assert scan_started.is_set() and not release_scan.is_set()
+            assert source_id==order.order_id and {'carrier':carrier,'number':number}==expected
+            tracking_sent.set()
+            return expected
+
+    class Shopify:
+        def __init__(self,*args): pass
+        async def check_scopes(self,**kwargs): pass
+
+        async def fulfilled_order_ids(self,ids):
+            if hidden_ready.is_set() and shopify_id in ids:
+                return {shopify_id}
+            return set()
+
+        async def tracking(self,id):
+            assert id==shopify_id
+            return {'shipments':[{'company':expected['carrier'],'number':expected['number'],'complete':True}]}
+
+    monkeypatch.setattr(web,'TikTokBrowser',Browser)
+    monkeypatch.setattr(web,'OrderShopify',Shopify)
+    box=SecretBox.from_file(tmp_path/'key')
+    core=SimpleNamespace(settings=SimpleNamespace(data_dir=tmp_path),secrets=box,
+                         get_credentials=lambda _: {'shop_domain':domain})
+    app=FastAPI()
+    store=mount_orders(app,core,lambda _:None)
+    store.configure(shop_id=order.shop_id,target_shop=domain,tracking_enabled=True,tracking_verified=True,
+                    carriers={'Royal Mail':'Royal Mail'})
+    store.record(order,'linked',shopify_id=shopify_id)
+    headers={'x-order-csrf':app.state.order_csrf}
+    with TestClient(app) as client:
+        try:
+            assert client.post('/orders/scan',headers=headers).status_code==200
+            assert scan_started.wait(3)
+            store.configure(results_hidden=True)
+            hidden_ready.set()
+            assert tracking_sent.wait(3)
+        finally:
+            release_scan.set()
+
+
 def test_automatic_tracking_requires_verified_pilot(tmp_path,monkeypatch):
     from app.order_store import OrderStore
 
@@ -105,7 +179,7 @@ def test_empty_queue_verifies_preview_but_signout_pauses_without_writes(tmp_path
     monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
     finished=threading.Event()
     class Browser:
-        def __init__(self,*_): pass
+        def __init__(self,*_,**kwargs): pass
         def start(self): pass
         def close(self): pass
         def scan_ids(self):
@@ -220,7 +294,7 @@ def test_manual_import_only_packing_with_timer_off_and_does_not_repeat(tmp_path,
     monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
     finished=threading.Event(); created=[]; inspected=[]
     class Browser:
-        def __init__(self,*args): pass
+        def __init__(self,*args,**kwargs): pass
         def start(self): pass
         def close(self): pass
         def scan_ids(self): return [sample().order_id]
@@ -275,7 +349,7 @@ def test_scan_failure_reports_stage_and_type_without_exception_content(tmp_path,
     monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
     finished=threading.Event()
     class Browser:
-        def __init__(self,*args): pass
+        def __init__(self,*args,**kwargs): pass
         def start(self): pass
         def close(self): pass
         def scan_ids(self): raise TimeoutError('private customer or session data')
@@ -310,7 +384,7 @@ def test_review_order_does_not_block_verified_orders(tmp_path,monkeypatch,valid_
     finished=threading.Event(); created=[]
     broken='999999999999999999'
     class Browser:
-        def __init__(self,*args): pass
+        def __init__(self,*args,**kwargs): pass
         def start(self): pass
         def close(self): pass
         def scan_ids(self): return [broken,*([sample().order_id] if valid_order else [])]

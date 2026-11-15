@@ -9,6 +9,7 @@ if su-exec shopsync-browser test -w /config/tiktok-browser/Default; then
     exit 1
 fi
 /usr/local/bin/shop-sync-prepare-profile
+su-exec shopsync-browser test -w /config/tiktok-tracking-browser
 su-exec shopsync-browser /bin/sh -eu -c '
     test "$(cat /config/tiktok-browser/Default/retained)" = retained
     test -w /config/tiktok-browser/Default

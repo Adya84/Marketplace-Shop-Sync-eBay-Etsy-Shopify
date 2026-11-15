@@ -19,6 +19,16 @@ async function testTracking(button){
  }catch(e){notice.textContent=e.message}
  finally{button.disabled=false}
 }
+async function startTrackingBrowser(button){
+ const notice=byId('tracking-browser-status');
+ button.disabled=true;
+ notice.textContent='Starting the tracking browser…';
+ try{
+  await send('tracking/browser/start');
+  notice.textContent='Tracking browser started. Sign in below if prompted.';
+ }catch(e){notice.textContent=e.message}
+ finally{button.disabled=false}
+}
 async function saveTracking(checkbox){
  const enabled=checkbox.checked;
  const notice=byId('tracking-status');
