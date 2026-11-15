@@ -7,6 +7,27 @@ from app.order_web import mount_orders
 from app.security import SecretBox
 
 
+def test_automatic_tracking_requires_verified_pilot(tmp_path,monkeypatch):
+    from app.order_store import OrderStore
+
+    monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
+    box=SecretBox.from_file(tmp_path/'key')
+    core=SimpleNamespace(settings=SimpleNamespace(data_dir=tmp_path),secrets=box)
+    app=FastAPI(); mount_orders(app,core,lambda _:None)
+    client=TestClient(app)
+    headers={'x-order-csrf':app.state.order_csrf}
+    store=OrderStore(tmp_path/'orders.db',box)
+    path='/orders/tracking/settings'
+    assert client.post(path,json={'enabled':True}).status_code==403
+    assert client.post(path,headers=headers,json={'enabled':True}).status_code==400
+    assert not store.settings()['tracking_enabled']
+    store.configure(tracking_verified=True)
+    assert client.post(path,headers=headers,json={'enabled':True}).status_code==200
+    assert store.settings()['tracking_enabled']
+    assert client.post(path,headers=headers,json={'enabled':False}).status_code==200
+    assert not store.settings()['tracking_enabled']
+
+
 def test_inline_weight_persists_without_disabling_automatic_import(tmp_path,monkeypatch):
     from app.order_store import OrderStore
     from app.tests.test_orders import sample

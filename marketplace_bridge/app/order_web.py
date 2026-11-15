@@ -135,8 +135,9 @@ def mount_orders(app,core,client_factory):
                         order.validate()
                         if store.get(order.shop_id,order_id)['state'] in {'preview','linked'}: ready+=1
                     except OrderProblem: pass
-                    # Tracking submission remains manual in this beta; show verified data only.
-                    await sync.sync_tracking(order,browser,writes=False)
+                    tracking_settings=store.settings()
+                    await sync.sync_tracking(order,browser,writes=writes and
+                        tracking_settings.get('tracking_verified') and tracking_settings['tracking_enabled'])
                 # Detail failures remain durable review rows and never reach
                 # creation. They must not block independently validated orders.
                 if dry: store.configure(preview_verified=not ids or ready>0)
@@ -239,7 +240,7 @@ def mount_orders(app,core,client_factory):
         '''+workspace_navigation('orders',base)+'''<h1>TikTok orders → Shopify</h1>
         <p>Order-only beta. Paid, seller-fulfilled orders become physical Shopify orders for postage labels. No catalogue matching.</p>
         <section><h2>Connection and controls</h2><p id="status">'''+esc(config['last_message'])+'''</p><p id="last-success">Last completed scan: not recorded yet.</p>
-        <p>Connected Shopify: <strong>'''+esc(domain or 'Not connected')+'''</strong>. Tracking return is manual in this beta.</p>
+        <p>Connected Shopify: <strong>'''+esc(domain or 'Not connected')+'''</strong>.</p>
         <label>TikTok shop name <input id="shop_name" value="'''+values['shop_name']+'''"></label>
         <label>TikTok shop ID <input id="shop_id" value="'''+values['shop_id']+'''"></label>
         <label>Verified Shopify destination <input id="target_shop" value="'''+values['target_shop']+'''" placeholder="your-shop.myshopify.com"></label>
@@ -248,6 +249,12 @@ def mount_orders(app,core,client_factory):
         <label><input id="enabled" type="checkbox" '''+('checked' if config['enabled'] else '')+'''>Import new orders every five minutes</label>
         <button id="save-settings" onclick="save()">Save settings</button><button onclick="act('scan')">Scan and preview</button><button id="import-now" onclick="act('import')">Import TikTok orders now</button><button onclick="act('browser/start')">Start TikTok browser</button><button onclick="location.reload()">Refresh orders</button><p id="action-status" role="status"></p>
         <p>Start the browser, sign in below, save the verified account and actual weights, then preview before enabling imports. Session expiry pauses imports until you sign in again.</p></section>
+        <section><h2>Shopify tracking to TikTok</h2>
+        <p>Test with one seller-shipped order awaiting packing. This submits its Shopify tracking and marks the parcel ready for collection in TikTok.</p>
+        <label>TikTok order ID <input id="tracking-order-id" inputmode="numeric" pattern="[0-9]{10,30}"></label>
+        <button type="button" onclick="testTracking(this)">Submit tracking for this order</button>
+        <label><input id="tracking-enabled" type="checkbox" onchange="saveTracking(this)" '''+('checked' if config['tracking_enabled'] else '')+'''>Send tracking during automatic order checks after a successful test</label>
+        <p id="tracking-status" role="status"></p></section>
         <section><h2>TikTok browser</h2><p>Sign in here on this Home Assistant host. Your browser session stays in the app’s private configuration.</p>
         <iframe title="TikTok sign in" src="'''+esc(base)+'''/orders/desktop/vnc.html?autoconnect=true&amp;reconnect=true&amp;reconnect_delay=3000&amp;resize=scale&amp;path='''+quote(base+'/orders/desktop/websockify?token='+csrf,safe='')+'''"></iframe></section>
         <section><h2>Import preview and review</h2><p>Buyer discounts are included when importing paid orders for postage. Unknown weights, masked addresses, inconsistent item subtotals, cancelled orders and multiple parcels need review. No labels are purchased automatically.</p><div class="scroll"><table><thead><tr><th>TikTok order</th><th>Status</th><th>Items</th><th>Delivery</th><th>GBP</th><th>Review</th><th>Tracking</th></tr></thead><tbody>'''+''.join(rows)+'''</tbody></table></div></section>
@@ -294,6 +301,52 @@ def mount_orders(app,core,client_factory):
         stamp=datetime.now(timezone.utc).isoformat()
         store.configure(weights=weights,settings_saved_at=stamp)
         return {'weights':weights}
+
+    @app.post('/orders/tracking/pilot')
+    async def tracking_pilot(request:Request):
+        value=await request.json()
+        order_id=value.get('order_id') if isinstance(value,dict) else None
+        if not isinstance(order_id,str) or not re.fullmatch(r'[0-9]{10,30}',order_id):
+            raise HTTPException(400,'Enter a TikTok order ID')
+        if run_lock.locked():
+            raise HTTPException(409,'Wait for the current order scan to finish')
+        async with run_lock:
+            config=store.settings()
+            credential=core.get_credentials('shopify')
+            if not config['target_shop'] or config['target_shop']!=credential.get('shop_domain'):
+                raise HTTPException(400,'Verify the Shopify destination first')
+            try:
+                shopify=OrderShopify(client_factory(credential))
+                await shopify.check_scopes(writes=False)
+                await asyncio.to_thread(browser.start)
+                order=await asyncio.to_thread(browser.detail,order_id)
+                order.validate()
+                if order.shop_id!=config['shop_id'] or order.status!='Awaiting packing' or order.tracking:
+                    raise OrderProblem('Choose a seller-shipped order awaiting packing with no TikTok tracking')
+                sync=OrderSync(store,shopify)
+                await sync.import_order(order,writes=False)
+                if not await sync.sync_tracking(order,browser,writes=True):
+                    row=store.get(order.shop_id,order_id)
+                    raise OrderProblem(row['message'] if row and row['message']!='Existing Shopify order found'
+                                       else 'No complete mapped Shopify shipment was found')
+            except OrderProblem as exc:
+                raise HTTPException(400,str(exc)) from None
+            except Exception:
+                raise HTTPException(400,'Could not verify TikTok tracking. Check Seller Centre before trying again.') from None
+            store.configure(tracking_verified=True)
+            return {'ok':True}
+
+    @app.post('/orders/tracking/settings')
+    async def tracking_settings(request:Request):
+        value=await request.json()
+        enabled=value.get('enabled') if isinstance(value,dict) else None
+        if type(enabled) is not bool:
+            raise HTTPException(400,'Invalid tracking setting')
+        config=store.settings()
+        if enabled and not config.get('tracking_verified'):
+            raise HTTPException(400,'Submit and verify one parcel before enabling automatic tracking')
+        store.configure(tracking_enabled=enabled)
+        return {'ok':True}
 
     @app.post('/orders/scan')
     async def scan():

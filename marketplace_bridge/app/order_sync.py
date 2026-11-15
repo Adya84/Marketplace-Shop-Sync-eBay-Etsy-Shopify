@@ -62,7 +62,7 @@ class OrderSync:
 
     async def sync_tracking(self,order,browser,*,writes=False):
         previous=self.store.get(order.shop_id,order.order_id)
-        if not previous or not previous.get('shopify_id') or previous['state'] in {'uncertain','claimed','validation_review'}: return
+        if not previous or not previous.get('shopify_id') or previous['state'] not in {'linked','tracking_uncertain'}: return
         async with self.lock:
             try:
                 data=await self.shopify.tracking(previous['shopify_id'])
@@ -92,6 +92,7 @@ class OrderSync:
                 saved=await asyncio.to_thread(browser.submit_tracking,order.order_id,carrier,number)
                 if saved != expected: raise OrderProblem('Tracking could not be verified')
                 self.store.record(order,'linked','Tracking verified in TikTok',tracking=[expected])
+                return True
             except Exception:
                 latest=self.store.get(order.shop_id,order.order_id)
                 state='tracking_uncertain' if latest and latest['state']=='tracking_uncertain' else 'review'

@@ -360,7 +360,7 @@ class TikTokBrowser:
         if len(packing)!=1: raise OrderProblem('Awaiting packing filter could not be verified')
         return packing[0]
 
-    def _scan_ids(self):
+    def _scan_ids(self, tracking_order_id=None):
         from selenium.webdriver.common.by import By
         with self.lock:
             # Use the observed Seller Centre queue URL. Home-page card labels
@@ -408,6 +408,25 @@ class TikTokBrowser:
             for _ in range(500):
                 # Wrap empty pages so WebDriverWait does not treat [] as loading.
                 ids=self.wait(ready_page)[0]
+                if tracking_order_id in ids:
+                    for link in self.driver.find_elements(By.CSS_SELECTOR,'a[href*="/order/detail?order_no="]'):
+                        if not link.is_displayed(): continue
+                        if parse_qs(urlparse(link.get_attribute('href')).query).get('order_no') != [tracking_order_id]:
+                            continue
+                        row=link.find_element(By.XPATH,'ancestor::tr[1]')
+                        if 'Shipped from seller' not in lines(row.text):
+                            raise OrderProblem('TikTok row is not seller shipped')
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        ActionChains(self.driver).move_to_element(row).perform()
+                        buttons=[element for element in row.find_elements(By.XPATH,
+                            ".//*[self::button or @role='button' or self::a][normalize-space(.)='Add tracking info']")
+                            if element.is_displayed()]
+                        if len(buttons)!=1:
+                            raise OrderProblem('Add tracking info action could not be verified')
+                        handles=set(self.driver.window_handles)
+                        buttons[0].click()
+                        return handles
+                    raise OrderProblem('Tracking order row could not be verified')
                 if not ids and expected_count==0: return []
                 signature=tuple(ids)
                 if signature in seen: raise OrderProblem('Order pagination repeated; scan incomplete')
@@ -426,6 +445,8 @@ class TikTokBrowser:
             raise OrderProblem('Order pagination limit reached; scan incomplete')
 
     def submit_tracking(self,order_id,carrier,number):
+        from selenium.webdriver.common.by import By
+
         with self.lock:
             order=self.detail(order_id)
             expected={'number':number,'carrier':carrier}
@@ -433,6 +454,57 @@ class TikTokBrowser:
                 if order.tracking==[expected]: return expected
                 raise OrderProblem('Existing TikTok tracking conflicts')
             order.validate()
-            # Tracking entry is deliberately unavailable until the live form is
-            # verified on the installed host. Never guess a fulfilment action.
-            raise OrderProblem('Tracking submission is not verified on this installation; add tracking manually')
+            if order.status!='Awaiting packing' or not re.fullmatch(r'[A-Za-z0-9._/-]{4,50}',number):
+                raise OrderProblem('Order or tracking number is not eligible for submission')
+            handles=self._scan_ids(tracking_order_id=order_id)
+            if not isinstance(handles,set):
+                raise OrderProblem('Order was not found in Awaiting packing')
+            original=self.order_window
+
+            def form_ready():
+                new=set(self.driver.window_handles)-handles
+                if len(new)>1:
+                    raise OrderProblem('TikTok opened multiple windows')
+                if new:
+                    self.driver.switch_to.window(next(iter(new)))
+                url=urlparse(self.driver.current_url)
+                return url.hostname=='seller-uk.tiktok.com' and url.path=='/order/seller-shipping/confirm'
+
+            def only(elements):
+                visible=[element for element in elements if element.is_displayed()]
+                if len(visible)!=1:
+                    raise OrderProblem('TikTok tracking form layout could not be verified')
+                return visible[0]
+
+            try:
+                self.wait(form_ready)
+                self.wait(lambda:self.guard() is None)
+                self.wait(lambda:self.find_text('Total parcels: 1'))
+                field=only(self.driver.find_elements(By.CSS_SELECTOR,'input[placeholder="Enter tracking ID"]'))
+                row=field.find_element(By.XPATH,'ancestor::tr[1]')
+                if order_id not in lines(row.text) or field.get_attribute('value'):
+                    raise OrderProblem('Tracking form order or existing tracking could not be verified')
+                field.send_keys(number)
+                provider=only(row.find_elements(By.CSS_SELECTOR,'[role="combobox"]'))
+                provider.click()
+                options=[element for element in self.driver.find_elements(By.CSS_SELECTOR,'[role="option"], label')
+                         if element.is_displayed() and element.text.strip()==carrier]
+                only(options).click()
+                selected=provider.text.strip()
+                values=[element.get_attribute('value') for element in provider.find_elements(By.CSS_SELECTOR,'input')]
+                if carrier not in lines(selected) and carrier not in values:
+                    raise OrderProblem('Selected shipping provider could not be verified')
+                if field.get_attribute('value')!=number:
+                    raise OrderProblem('Entered tracking number could not be verified')
+                only(self.find_text('Submit 1 parcel','button')).click()
+                self.wait(lambda:urlparse(self.driver.current_url).path!='/order/seller-shipping/confirm'
+                          or not self.find_text('Submit 1 parcel','button'))
+            finally:
+                current=self.driver.current_window_handle
+                if current not in handles and original in self.driver.window_handles:
+                    self.driver.close()
+                    self.driver.switch_to.window(original)
+            saved=self.detail(order_id)
+            if saved.tracking != [expected]:
+                raise OrderProblem('Submitted tracking could not be verified in TikTok')
+            return expected
