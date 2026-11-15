@@ -11,6 +11,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from urllib.parse import quote
+from weakref import WeakValueDictionary
 import httpx
 from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -23,6 +24,7 @@ from .workspace_navigation import workspace_navigation
 from .order_feedback import next_scan_seconds, summarize_run
 from pathlib import Path
 
+TRACKING_POLL_SECONDS=5
 
 async def desktop_ready(port=5900):
     writer=None
@@ -69,6 +71,17 @@ def mount_orders(app,core,client_factory):
     app.state.order_csrf=csrf
     instance=secrets.token_hex(16) # Public restart marker, never an authentication token.
     run_lock=asyncio.Lock()
+    tracking_lock=asyncio.Lock()
+    order_locks=WeakValueDictionary()
+    tracking_browser=TikTokBrowser(core.settings.data_dir/'tiktok-tracking-browser',store.settings,display=':100')
+
+    def order_lock(shop_id,order_id):
+        key=(shop_id,order_id)
+        lock=order_locks.get(key)
+        if lock is None:
+            lock=order_locks[key]=asyncio.Lock()
+        return lock
+
     app.state.tiktok_browser=browser
     app.state.tiktok_browser_lock=run_lock
     def browser_view_url(base):
@@ -108,6 +121,9 @@ def mount_orders(app,core,client_factory):
                 ready=0; failures=0
                 pending=list(dict.fromkeys(ids))
                 for position,order_id in enumerate(pending,1):
+                    ledger_lock=order_lock(config['shop_id'],order_id)
+                    if ledger_lock.locked():
+                        continue
                     stage='order verification'
                     store.configure(last_message=f'Checking order {position} of {len(pending)}…')
                     try:
@@ -122,12 +138,18 @@ def mount_orders(app,core,client_factory):
                         failures+=1
                         states.append('source_failed')
                         reason=str(exc) if isinstance(exc,OrderProblem) else type(exc).__name__
-                        store.source_failure(SourceOrder(**payload),reason)
+                        if ledger_lock.locked():
+                            continue
+                        async with ledger_lock:
+                            store.source_failure(SourceOrder(**payload),reason)
                         continue
                     # Never backfill already-dispatched historical orders.
                     if order.status!='Awaiting packing': continue
                     before=store.get(order.shop_id,order_id)
-                    await sync.import_order(order,writes=writes)
+                    if ledger_lock.locked():
+                        continue
+                    async with ledger_lock:
+                        await sync.import_order(order,writes=writes)
                     after=store.get(order.shop_id,order_id)
                     states.append(after['state'] if after else 'source_failed')
                     if writes and after and after['state']=='linked' and not (before and before.get('shopify_id')) and after['message']=='Imported into Shopify': imported+=1
@@ -182,11 +204,11 @@ def mount_orders(app,core,client_factory):
     async def poll_tracking():
         nonlocal tracking_retry_after
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(TRACKING_POLL_SECONDS)
             config=store.settings()
-            if not config['tracking_enabled'] or not config.get('tracking_verified') or run_lock.locked():
+            if not config['tracking_enabled'] or not config.get('tracking_verified') or tracking_lock.locked():
                 continue
-            async with run_lock:
+            async with tracking_lock:
                 try:
                     credential=core.get_credentials('shopify')
                     if not config['target_shop'] or config['target_shop']!=credential.get('shop_domain'):
@@ -212,12 +234,13 @@ def mount_orders(app,core,client_factory):
                         parcel=parcels[0]
                         if not parcel.get('number') or not config['carriers'].get(parcel.get('company')):
                             continue
-                        await asyncio.to_thread(browser.start)
-                        order=await asyncio.to_thread(browser.detail,source_id)
+                        await asyncio.to_thread(tracking_browser.start)
+                        order=await asyncio.to_thread(tracking_browser.detail,source_id)
                         if order.shop_id!=config['shop_id']: continue
                         if not order.tracking and order.status!='Awaiting packing': continue
-                        if await sync.sync_tracking(order,browser,writes=store.settings()['tracking_enabled']):
-                            sent+=1
+                        async with order_lock(order.shop_id,source_id):
+                            if await sync.sync_tracking(order,tracking_browser,writes=store.settings()['tracking_enabled']):
+                                sent+=1
                     tracking_status['message']=f'{len(fulfilled)} shipped Shopify orders checked. {sent} tracking updates verified.'
                 except SignInRequired:
                     store.configure(tracking_enabled=False)
@@ -239,7 +262,7 @@ def mount_orders(app,core,client_factory):
                 tracking_task.cancel()
                 for task in tasks: task.cancel()
                 await asyncio.gather(poll_task,tracking_task,*tasks,return_exceptions=True)
-                await asyncio.to_thread(browser.close)
+                await asyncio.gather(asyncio.to_thread(browser.close),asyncio.to_thread(tracking_browser.close))
     app.router.lifespan_context=lifespan
 
     @app.middleware('http')
@@ -352,6 +375,8 @@ def mount_orders(app,core,client_factory):
         if not re.fullmatch(r'(?:/[A-Za-z0-9_-]+)*',base):
             raise HTTPException(400,'Invalid ingress path')
         boot=json.dumps({'csrf':csrf,'base':base})
+        viewer=base+'/orders/desktop/vnc.html?autoconnect=true&resize=scale&path='+quote(
+            base+'/orders/tracking/desktop/websockify?token='+csrf,safe='')
         script=Path(__file__).with_name('tracking_feedback.js').read_text(encoding='utf-8')
         return HTMLResponse('''<!doctype html><html lang="en"><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1"><title>TikTok tracking</title>
@@ -360,21 +385,42 @@ def mount_orders(app,core,client_factory):
         input,button{font:inherit;padding:8px}button{background:#253e80;color:white;border:0;border-radius:7px}</style>
         <main>'''+workspace_navigation('tracking',base)+'''<h1>Shopify tracking to TikTok</h1>
         <section><h2>Automatic tracking</h2>
-        <p>Shop Sync checks linked Shopify orders every five seconds while idle. It sends tracking for fulfilled orders with one parcel.</p>
+        <p>Shop Sync checks linked Shopify orders every five seconds using a separate browser from order imports. It sends tracking for fulfilled orders with one parcel.</p>
         <label><input id="tracking-enabled" type="checkbox" onchange="saveTracking(this)" disabled>Send tracking automatically</label>
         <p id="tracking-check" role="status">Loading tracking status…</p></section>
         <section><h2>Test one parcel</h2>
         <p>Choose an order that has been fulfilled in Shopify and is awaiting packing in TikTok. Submitting its tracking marks it ready for collection.</p>
         <label>TikTok order ID <input id="tracking-order-id" inputmode="numeric" pattern="[0-9]{10,30}"></label>
         <button type="button" onclick="testTracking(this)">Submit tracking for this order</button>
-        <p id="tracking-status" role="status"></p></section></main>
+        <p id="tracking-status" role="status"></p></section>
+        <section><h2>TikTok tracking browser</h2>
+        <p>Start this browser and sign in to Seller Centre to use tracking.</p>
+        <button type="button" onclick="startTrackingBrowser(this)">Start tracking browser</button>
+        <p id="tracking-browser-status" role="status"></p>
+        <iframe title="TikTok tracking browser" style="width:100%;height:640px;border:0" src="'''+html.escape(viewer,quote=True)+'''"></iframe>
+        </section></main>
         <script>const cfg='''+boot+''';'''+script+'''</script></html>''')
 
     @app.get('/orders/tracking/status')
     async def tracking_workspace_status():
         config=store.settings()
         return {**tracking_status,'enabled':config['tracking_enabled'],
-                'verified':bool(config.get('tracking_verified')),'busy':run_lock.locked()}
+                'verified':bool(config.get('tracking_verified')),'busy':tracking_lock.locked()}
+
+    @app.post('/orders/tracking/browser/start')
+    async def start_tracking_browser():
+        if tracking_lock.locked():
+            raise HTTPException(409,'The tracking browser is busy. Try again when it finishes.')
+        async with tracking_lock:
+            if not await desktop_ready(port=5903):
+                raise HTTPException(503,'The tracking browser display is unavailable.')
+            try:
+                await asyncio.to_thread(tracking_browser.start)
+            except SignInRequired:
+                pass
+            except Exception:
+                raise HTTPException(503,'The tracking browser could not start.') from None
+            return {'ok':True}
 
     @app.post('/orders/tracking/pilot')
     async def tracking_pilot(request:Request):
@@ -382,9 +428,9 @@ def mount_orders(app,core,client_factory):
         order_id=value.get('order_id') if isinstance(value,dict) else None
         if not isinstance(order_id,str) or not re.fullmatch(r'[0-9]{10,30}',order_id):
             raise HTTPException(400,'Enter a TikTok order ID')
-        if run_lock.locked():
-            raise HTTPException(409,'Wait for the current order scan to finish')
-        async with run_lock:
+        if tracking_lock.locked():
+            raise HTTPException(409,'Wait for the current tracking check to finish')
+        async with tracking_lock:
             config=store.settings()
             credential=core.get_credentials('shopify')
             if not config['target_shop'] or config['target_shop']!=credential.get('shop_domain'):
@@ -392,17 +438,18 @@ def mount_orders(app,core,client_factory):
             try:
                 shopify=OrderShopify(client_factory(credential))
                 await shopify.check_scopes(writes=False)
-                await asyncio.to_thread(browser.start)
-                order=await asyncio.to_thread(browser.detail,order_id)
+                await asyncio.to_thread(tracking_browser.start)
+                order=await asyncio.to_thread(tracking_browser.detail,order_id)
                 order.validate()
                 if order.shop_id!=config['shop_id'] or order.status!='Awaiting packing' or order.tracking:
                     raise OrderProblem('Choose a seller-shipped order awaiting packing with no TikTok tracking')
                 sync=OrderSync(store,shopify)
-                await sync.import_order(order,writes=False)
-                if not await sync.sync_tracking(order,browser,writes=True):
-                    row=store.get(order.shop_id,order_id)
-                    raise OrderProblem(row['message'] if row and row['message']!='Existing Shopify order found'
-                                       else 'No complete mapped Shopify shipment was found')
+                async with order_lock(order.shop_id,order_id):
+                    await sync.import_order(order,writes=False)
+                    if not await sync.sync_tracking(order,tracking_browser,writes=True):
+                        row=store.get(order.shop_id,order_id)
+                        raise OrderProblem(row['message'] if row and row['message']!='Existing Shopify order found'
+                                           else 'No complete mapped Shopify shipment was found')
             except OrderProblem as exc:
                 raise HTTPException(400,str(exc)) from None
             except Exception:
@@ -498,6 +545,7 @@ def mount_orders(app,core,client_factory):
             return Response(result.content,status_code=result.status_code,media_type=result.headers.get('content-type'))
         except httpx.HTTPError: return Response('Browser panel unavailable on this host.',status_code=503)
 
+    @app.websocket('/orders/tracking/desktop/websockify')
     @app.websocket('/orders/desktop/websockify')
     async def desktop_socket(websocket:WebSocket):
         if not websocket.client or not ingress_peer(websocket.client.host):
@@ -508,7 +556,8 @@ def mount_orders(app,core,client_factory):
         import websockets
         await websocket.accept(subprotocol='binary' if 'binary' in websocket.headers.get('sec-websocket-protocol','') else None)
         try:
-            async with websockets.connect('ws://127.0.0.1:6080/websockify') as upstream:
+            port=6083 if websocket.url.path=='/orders/tracking/desktop/websockify' else 6080
+            async with websockets.connect(f'ws://127.0.0.1:{port}/websockify') as upstream:
                 async def incoming():
                     while True:
                         msg=await websocket.receive()

@@ -4,6 +4,7 @@ Selectors are intentionally strict. A changed page stops a scan or creates a
 review row instead of guessing recipient, price, carrier, or order identity.
 """
 import re
+import os
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
@@ -130,12 +131,13 @@ def parse_detail(text,shop_id,order_id,weights):
                        email=emails[0] if emails else '')
 
 class TikTokBrowser:
-    def __init__(self,profile,settings,report=None):
+    def __init__(self,profile,settings,report=None,*,display=None):
         self.profile=str(profile); self.settings=settings; self.driver=None
         self.report=report or (lambda _:None)
         self.lock=threading.RLock()
         self.order_window=None
         self.listing_window=None
+        self.display=display
 
     def select_order_window(self):
         """Give order navigation its own tab; never reuse a product form."""
@@ -255,7 +257,8 @@ class TikTokBrowser:
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--no-first-run')
             options.add_argument('--restore-last-session')
-            self.driver=webdriver.Chrome(service=Service('/usr/local/bin/shop-sync-chromedriver'),options=options)
+            env={**os.environ,'DISPLAY':self.display} if self.display else None
+            self.driver=webdriver.Chrome(service=Service('/usr/local/bin/shop-sync-chromedriver',env=env),options=options)
             self.driver.set_page_load_timeout(60)
             self.navigate(ORIGIN+'/homepage')
 
