@@ -96,4 +96,28 @@ async function save(){if(saving||weightSaving)return;const submittedRevision=edi
  lastResult=null;weightRevision++;
  dirty=editRevision!==submittedRevision;if(!dirty)weightsDirty=false;delete saveNotice.dataset.error;saveNotice.textContent=dirty?'Earlier settings saved; newer changes are unsaved.':'Settings saved at '+stamp(data.saved_at);saveNotice.style.color=dirty?'#924000':'#166534';
  }catch(e){saveNotice.dataset.error='true';saveNotice.textContent='Not saved: '+e.message;saveNotice.style.color='#b91c1c'}finally{saving=false;await status()}}
+async function testTracking(button){
+ const field=byId('tracking-order-id');
+ const orderId=field.value.trim();
+ const notice=byId('tracking-status');
+ if(!/^[0-9]{10,30}$/.test(orderId)){notice.textContent='Enter a TikTok order ID.';return}
+ button.disabled=true;
+ notice.textContent='Checking Shopify and submitting tracking to TikTok…';
+ try{
+  await send('tracking/pilot',{order_id:orderId});
+  notice.textContent='Tracking verified in TikTok. You can now enable automatic tracking.';
+  lastResult=null;
+ }catch(e){notice.textContent=e.message}
+ finally{button.disabled=false;await status()}
+}
+async function saveTracking(checkbox){
+ const enabled=checkbox.checked;
+ const notice=byId('tracking-status');
+ checkbox.disabled=true;
+ try{
+  await send('tracking/settings',{enabled});
+  notice.textContent=enabled?'Automatic tracking enabled. Leave automatic order checks on.':'Automatic tracking switched off.';
+ }catch(e){checkbox.checked=!enabled;notice.textContent=e.message}
+ finally{checkbox.disabled=false}
+}
 status();setInterval(status,3000);setInterval(tick,1000);
