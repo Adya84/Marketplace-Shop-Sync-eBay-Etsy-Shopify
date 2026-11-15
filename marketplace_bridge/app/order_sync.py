@@ -64,12 +64,17 @@ class OrderSync:
         previous=self.store.get(order.shop_id,order.order_id)
         if not previous or not previous.get('shopify_id') or previous['state'] not in {'linked','tracking_uncertain'}: return
         async with self.lock:
+            stage='Reading tracking from Shopify'
             try:
                 data=await self.shopify.tracking(previous['shopify_id'])
+                if previous['state']=='tracking_uncertain' and not order.tracking:
+                    self.store.record(order,'tracking_uncertain','A previous TikTok submission could not be verified. Check Seller Centre before retrying.')
+                    return
                 if data.get('cancelledAt') or order.status == 'Cancelled':
                     self.store.record(order,'review','Cancellation requires review; tracking was not changed'); return
                 shipments=data.get('shipments',[])
-                if not shipments: return
+                if not shipments:
+                    self.store.record(order,'linked','Shopify has no shipment tracking for this order yet'); return
                 if len(shipments)!=1 or not shipments[0].get('complete'):
                     self.store.record(order,'review','Partial or multiple shipments require manual tracking'); return
                 shipment=shipments[0]
@@ -83,17 +88,25 @@ class OrderSync:
                     if order.tracking==[expected]:
                         self.store.record(order,'linked','Tracking already matches',tracking=[expected]); return
                     self.store.record(order,'review','TikTok already has different tracking; no overwrite'); return
-                if previous['state']=='tracking_uncertain':
-                    self.store.record(order,'tracking_uncertain','Inspect TikTok tracking before any further submission'); return
                 if not writes:
                     self.store.record(order,'linked','Tracking ready; automatic tracking writes are off'); return
-                # Persist before browser mutation: interruption cannot trigger a blind second submit.
-                self.store.record(order,'tracking_uncertain','Verifying TikTok tracking submission')
-                saved=await asyncio.to_thread(browser.submit_tracking,order.order_id,carrier,number)
+                stage=f'Found {carrier} tracking in Shopify. Preparing the TikTok form'
+
+                def before_submit():
+                    # Persist immediately before clicking Submit. A failed form
+                    # lookup can be retried without risking a duplicate dispatch.
+                    self.store.record(order,'tracking_uncertain','Verifying TikTok tracking submission')
+
+                saved=await asyncio.to_thread(browser.submit_tracking,order.order_id,carrier,number,
+                                              before_submit=before_submit)
                 if saved != expected: raise OrderProblem('Tracking could not be verified')
                 self.store.record(order,'linked','Tracking verified in TikTok',tracking=[expected])
                 return True
-            except Exception:
+            except Exception as exc:
                 latest=self.store.get(order.shop_id,order.order_id)
-                state='tracking_uncertain' if latest and latest['state']=='tracking_uncertain' else 'review'
-                self.store.record(order,state,'Tracking needs review; inspect TikTok before retrying')
+                if latest and latest['state']=='tracking_uncertain':
+                    self.store.record(order,'tracking_uncertain',
+                                      'Shopify tracking found. TikTok submission may have gone through. Check Seller Centre before retrying.')
+                else:
+                    detail=f': {exc}' if isinstance(exc,OrderProblem) else f' ({type(exc).__name__})'
+                    self.store.record(order,'linked',stage+detail+'. No tracking was submitted.')

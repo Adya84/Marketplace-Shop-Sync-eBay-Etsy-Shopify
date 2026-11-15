@@ -117,3 +117,34 @@ async def test_uncertain_tracking_never_blindly_submits_again(setup):
         def submit_tracking(self,*args): raise AssertionError('must not submit twice')
     await sync.sync_tracking(order,Browser(),writes=True)
     assert db.get(order.shop_id,order.order_id)['state']=='tracking_uncertain'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('clicked',[False,True])
+async def test_tracking_failure_records_whether_tiktok_may_have_submitted(setup,clicked):
+    from app.order_models import OrderProblem
+
+    db,api,sync=setup; order=sample()
+    db.configure(carriers={'Royal Mail':'Royal Mail'})
+    db.record(order,'linked',shopify_id='gid://shopify/Order/123')
+
+    async def tracking(_):
+        return {'shipments':[dict(number='AB123GB',company='Royal Mail',complete=True)]}
+
+    api.tracking=tracking
+
+    class Browser:
+        def submit_tracking(self,*args,before_submit):
+            if clicked:
+                before_submit()
+            raise OrderProblem('TikTok form failed')
+
+    await sync.sync_tracking(order,Browser(),writes=True)
+    row=db.get(order.shop_id,order.order_id)
+    if clicked:
+        assert row['state']=='tracking_uncertain'
+        assert 'may have gone through' in row['message']
+    else:
+        assert row['state']=='linked'
+        assert 'Found Royal Mail tracking in Shopify' in row['message']
+        assert 'No tracking was submitted' in row['message']

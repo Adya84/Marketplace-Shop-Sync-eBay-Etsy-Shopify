@@ -40,9 +40,10 @@ def test_tracking_checks_fulfilled_shopify_orders_during_import_scan(tmp_path,mo
             assert source_id==order.order_id
             return order
 
-        def submit_tracking(self,source_id,carrier,number):
+        def submit_tracking(self,source_id,carrier,number,*,before_submit):
             assert scan_started.is_set() and not release_scan.is_set()
             assert source_id==order.order_id and {'carrier':carrier,'number':number}==expected
+            before_submit()
             tracking_sent.set()
             return expected
 

@@ -364,6 +364,7 @@ class TikTokBrowser:
         return packing[0]
 
     def _scan_ids(self, tracking_order_id=None):
+        from selenium.common.exceptions import TimeoutException
         from selenium.webdriver.common.by import By
         with self.lock:
             # Use the observed Seller Centre queue URL. Home-page card labels
@@ -421,9 +422,12 @@ class TikTokBrowser:
                             raise OrderProblem('TikTok row is not seller shipped')
                         from selenium.webdriver.common.action_chains import ActionChains
                         ActionChains(self.driver).move_to_element(row).perform()
-                        buttons=[element for element in row.find_elements(By.XPATH,
-                            ".//*[self::button or @role='button' or self::a][normalize-space(.)='Add tracking info']")
-                            if element.is_displayed()]
+                        try:
+                            buttons=self.wait(lambda:[element for element in row.find_elements(By.XPATH,
+                                ".//*[self::button or @role='button' or self::a][normalize-space(.)='Add tracking info']")
+                                if element.is_displayed()])
+                        except TimeoutException:
+                            raise OrderProblem('TikTok did not show Add tracking info on the matching order row') from None
                         if len(buttons)!=1:
                             raise OrderProblem('Add tracking info action could not be verified')
                         handles=set(self.driver.window_handles)
@@ -447,7 +451,7 @@ class TikTokBrowser:
                 self.wait(changed_page)
             raise OrderProblem('Order pagination limit reached; scan incomplete')
 
-    def submit_tracking(self,order_id,carrier,number):
+    def submit_tracking(self,order_id,carrier,number,*,before_submit):
         from selenium.webdriver.common.by import By
 
         with self.lock:
@@ -499,7 +503,9 @@ class TikTokBrowser:
                     raise OrderProblem('Selected shipping provider could not be verified')
                 if field.get_attribute('value')!=number:
                     raise OrderProblem('Entered tracking number could not be verified')
-                only(self.find_text('Submit 1 parcel','button')).click()
+                submit=only(self.find_text('Submit 1 parcel','button'))
+                before_submit()
+                submit.click()
                 self.wait(lambda:urlparse(self.driver.current_url).path!='/order/seller-shipping/confirm'
                           or not self.find_text('Submit 1 parcel','button'))
             finally:
