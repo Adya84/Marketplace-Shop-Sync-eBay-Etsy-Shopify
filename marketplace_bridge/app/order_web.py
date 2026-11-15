@@ -135,9 +135,6 @@ def mount_orders(app,core,client_factory):
                         order.validate()
                         if store.get(order.shop_id,order_id)['state'] in {'preview','linked'}: ready+=1
                     except OrderProblem: pass
-                    tracking_settings=store.settings()
-                    await sync.sync_tracking(order,browser,writes=writes and
-                        tracking_settings.get('tracking_verified') and tracking_settings['tracking_enabled'])
                 # Detail failures remain durable review rows and never reach
                 # creation. They must not block independently validated orders.
                 if dry: store.configure(preview_verified=not ids or ready>0)
@@ -179,16 +176,69 @@ def mount_orders(app,core,client_factory):
                 from .order_browser import browser_failure
                 store.configure(last_message=f'Between-check browser refresh failed: {browser_failure(exc)}; next check will retry.')
 
+    tracking_status={'message':'Waiting for the first tracking check','checked_at':None}
+    tracking_retry_after={}
+
+    async def poll_tracking():
+        nonlocal tracking_retry_after
+        while True:
+            await asyncio.sleep(5)
+            config=store.settings()
+            if not config['tracking_enabled'] or not config.get('tracking_verified') or run_lock.locked():
+                continue
+            async with run_lock:
+                try:
+                    credential=core.get_credentials('shopify')
+                    if not config['target_shop'] or config['target_shop']!=credential.get('shop_domain'):
+                        raise OrderProblem('Verify the Shopify destination first')
+                    now=time.monotonic()
+                    candidates=[row for row in store.tracking_candidates(config['shop_id'])
+                                if tracking_retry_after.get(row['source_id'],0)<=now]
+                    tracking_retry_after={key:value for key,value in tracking_retry_after.items() if value>now}
+                    shopify=OrderShopify(client_factory(credential))
+                    fulfilled=await shopify.fulfilled_order_ids(list(dict.fromkeys(row['shopify_id'] for row in candidates)))
+                    sent=0
+                    sync=OrderSync(store,shopify)
+                    for row in candidates:
+                        if row['shopify_id'] not in fulfilled: continue
+                        if not store.settings()['tracking_enabled']: break
+                        source_id=row['source_id']
+                        # Limit retries for shipped orders with no usable tracking or a transient failure.
+                        tracking_retry_after[source_id]=time.monotonic()+60
+                        shipment=await shopify.tracking(row['shopify_id'])
+                        parcels=shipment.get('shipments',[])
+                        if shipment.get('cancelledAt') or len(parcels)!=1 or not parcels[0].get('complete'):
+                            continue
+                        parcel=parcels[0]
+                        if not parcel.get('number') or not config['carriers'].get(parcel.get('company')):
+                            continue
+                        await asyncio.to_thread(browser.start)
+                        order=await asyncio.to_thread(browser.detail,source_id)
+                        if order.shop_id!=config['shop_id']: continue
+                        if not order.tracking and order.status!='Awaiting packing': continue
+                        if await sync.sync_tracking(order,browser,writes=store.settings()['tracking_enabled']):
+                            sent+=1
+                    tracking_status['message']=f'{len(fulfilled)} shipped Shopify orders checked. {sent} tracking updates verified.'
+                except SignInRequired:
+                    store.configure(tracking_enabled=False)
+                    tracking_status['message']='TikTok sign-in expired. Sign in and enable tracking again.'
+                except Exception:
+                    tracking_status['message']='Tracking check could not complete. Shop Sync will retry.'
+                finally:
+                    tracking_status['checked_at']=datetime.now(timezone.utc).isoformat()
+
     @asynccontextmanager
     async def lifespan(application):
         async with previous(application):
             poll_task=asyncio.create_task(poll_orders(lambda:store.settings()['enabled'],cycle,refresh_between_checks,
                                                     lambda:last_completed))
+            tracking_task=asyncio.create_task(poll_tracking())
             try: yield
             finally:
                 poll_task.cancel()
+                tracking_task.cancel()
                 for task in tasks: task.cancel()
-                await asyncio.gather(poll_task,*tasks,return_exceptions=True)
+                await asyncio.gather(poll_task,tracking_task,*tasks,return_exceptions=True)
                 await asyncio.to_thread(browser.close)
     app.router.lifespan_context=lifespan
 
@@ -249,12 +299,6 @@ def mount_orders(app,core,client_factory):
         <label><input id="enabled" type="checkbox" '''+('checked' if config['enabled'] else '')+'''>Import new orders every five minutes</label>
         <button id="save-settings" onclick="save()">Save settings</button><button onclick="act('scan')">Scan and preview</button><button id="import-now" onclick="act('import')">Import TikTok orders now</button><button onclick="act('browser/start')">Start TikTok browser</button><button onclick="location.reload()">Refresh orders</button><p id="action-status" role="status"></p>
         <p>Start the browser, sign in below, save the verified account and actual weights, then preview before enabling imports. Session expiry pauses imports until you sign in again.</p></section>
-        <section><h2>Shopify tracking to TikTok</h2>
-        <p>Test with one seller-shipped order awaiting packing. This submits its Shopify tracking and marks the parcel ready for collection in TikTok.</p>
-        <label>TikTok order ID <input id="tracking-order-id" inputmode="numeric" pattern="[0-9]{10,30}"></label>
-        <button type="button" onclick="testTracking(this)">Submit tracking for this order</button>
-        <label><input id="tracking-enabled" type="checkbox" onchange="saveTracking(this)" '''+('checked' if config['tracking_enabled'] else '')+'''>Send tracking during automatic order checks after a successful test</label>
-        <p id="tracking-status" role="status"></p></section>
         <section><h2>TikTok browser</h2><p>Sign in here on this Home Assistant host. Your browser session stays in the app’s private configuration.</p>
         <iframe title="TikTok sign in" src="'''+esc(base)+'''/orders/desktop/vnc.html?autoconnect=true&amp;reconnect=true&amp;reconnect_delay=3000&amp;resize=scale&amp;path='''+quote(base+'/orders/desktop/websockify?token='+csrf,safe='')+'''"></iframe></section>
         <section><h2>Import preview and review</h2><p>Buyer discounts are included when importing paid orders for postage. Unknown weights, masked addresses, inconsistent item subtotals, cancelled orders and multiple parcels need review. No labels are purchased automatically.</p><div class="scroll"><table><thead><tr><th>TikTok order</th><th>Status</th><th>Items</th><th>Delivery</th><th>GBP</th><th>Review</th><th>Tracking</th></tr></thead><tbody>'''+''.join(rows)+'''</tbody></table></div></section>
@@ -301,6 +345,36 @@ def mount_orders(app,core,client_factory):
         stamp=datetime.now(timezone.utc).isoformat()
         store.configure(weights=weights,settings_saved_at=stamp)
         return {'weights':weights}
+
+    @app.get('/orders/tracking',response_class=HTMLResponse)
+    async def tracking_workspace(request:Request):
+        base=request.headers.get('x-ingress-path','').rstrip('/')
+        if not re.fullmatch(r'(?:/[A-Za-z0-9_-]+)*',base):
+            raise HTTPException(400,'Invalid ingress path')
+        boot=json.dumps({'csrf':csrf,'base':base})
+        script=Path(__file__).with_name('tracking_feedback.js').read_text(encoding='utf-8')
+        return HTMLResponse('''<!doctype html><html lang="en"><meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1"><title>TikTok tracking</title>
+        <style>body{font:16px system-ui;background:#f3f5fa;color:#18213b;margin:24px}
+        main{max-width:1080px;margin:auto}section{background:#fff;padding:24px;margin:16px 0;border-radius:16px}
+        input,button{font:inherit;padding:8px}button{background:#253e80;color:white;border:0;border-radius:7px}</style>
+        <main>'''+workspace_navigation('tracking',base)+'''<h1>Shopify tracking to TikTok</h1>
+        <section><h2>Automatic tracking</h2>
+        <p>Shop Sync checks linked Shopify orders every five seconds while idle. It sends tracking for fulfilled orders with one parcel.</p>
+        <label><input id="tracking-enabled" type="checkbox" onchange="saveTracking(this)" disabled>Send tracking automatically</label>
+        <p id="tracking-check" role="status">Loading tracking status…</p></section>
+        <section><h2>Test one parcel</h2>
+        <p>Choose an order that has been fulfilled in Shopify and is awaiting packing in TikTok. Submitting its tracking marks it ready for collection.</p>
+        <label>TikTok order ID <input id="tracking-order-id" inputmode="numeric" pattern="[0-9]{10,30}"></label>
+        <button type="button" onclick="testTracking(this)">Submit tracking for this order</button>
+        <p id="tracking-status" role="status"></p></section></main>
+        <script>const cfg='''+boot+''';'''+script+'''</script></html>''')
+
+    @app.get('/orders/tracking/status')
+    async def tracking_workspace_status():
+        config=store.settings()
+        return {**tracking_status,'enabled':config['tracking_enabled'],
+                'verified':bool(config.get('tracking_verified')),'busy':run_lock.locked()}
 
     @app.post('/orders/tracking/pilot')
     async def tracking_pilot(request:Request):

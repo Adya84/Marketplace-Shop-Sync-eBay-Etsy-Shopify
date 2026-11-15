@@ -151,6 +151,17 @@ class OrderShopify:
         verify_shipping_address(order.get('shippingAddress'),payload['shippingAddress'])
         return order
 
+    async def fulfilled_order_ids(self,order_ids):
+        query='''query BridgeTrackingCandidates($ids: [ID!]!) {
+          nodes(ids: $ids) { ... on Order { id cancelledAt displayFulfillmentStatus } }
+        }'''
+        fulfilled=set()
+        for offset in range(0,len(order_ids),50):
+            data=await self.client.graphql(query,{'ids':order_ids[offset:offset+50]})
+            fulfilled.update(node['id'] for node in data['nodes'] if node and
+                             not node['cancelledAt'] and node['displayFulfillmentStatus']=='FULFILLED')
+        return fulfilled
+
     async def tracking(self,shopify_id):
         data=await self.client.graphql(ORDER_TRACKING,{'id':shopify_id})
         order=data['order']
