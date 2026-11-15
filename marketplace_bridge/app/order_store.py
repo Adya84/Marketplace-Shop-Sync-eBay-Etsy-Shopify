@@ -78,3 +78,12 @@ class OrderStore:
     def list_orders(self,limit=200):
         with self.connect() as conn:
             return [self._decode(row) for row in conn.execute('SELECT * FROM order_bridge ORDER BY updated_at DESC LIMIT ?',(limit,))]
+
+    def tracking_candidates(self,shop):
+        with self.connect() as conn:
+            rows=conn.execute("""SELECT * FROM order_bridge
+                WHERE shop=? AND state='linked' AND shopify_id IS NOT NULL AND tracking='[]'
+                ORDER BY updated_at DESC""",(shop,))
+            candidates=[self._decode(row) for row in rows]
+        return [row for row in candidates if row['payload'].get('status')=='Awaiting packing'
+                and row['payload'].get('seller_fulfilled')]
