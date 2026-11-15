@@ -158,7 +158,9 @@ class OrderShopify:
         shipments=[]
         for fulfillment in order['fulfillments']:
             if fulfillment['status']!='SUCCESS': continue
-            for info in fulfillment['trackingInfo']:
+            # A successful fulfillment without tracking still counts as a
+            # shipment when deciding whether the order is a single parcel.
+            for info in fulfillment['trackingInfo'] or [{}]:
                 shipments.append({'company':info.get('company') or '', 'number':info.get('number') or '',
                                   'complete':order['displayFulfillmentStatus']=='FULFILLED'})
         return {'cancelledAt':order['cancelledAt'],'shipments':shipments}
