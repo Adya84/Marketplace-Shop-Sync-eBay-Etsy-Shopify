@@ -216,18 +216,26 @@ def mount_orders(app,core,client_factory):
             active=config.get('active_packing_ids')
             if active is not None and (row['shop']!=config['shop_id'] or row['source_id'] not in active): continue
             payload=row['payload']; items=payload.get('items',[])
-            summary='; '.join(f"{i['quantity']} × {i['title']} — {i.get('variant','')} (SKU {i.get('sku','')})" for i in items)
+            item_rows=[]
+            for item in items:
+                sku=str(item.get('sku',''))
+                line=esc(f"{item['quantity']} × {item['title']} — {item.get('variant','')} (SKU {sku})")
+                if row['shop']==config['shop_id'] and re.fullmatch(r'[0-9]{5,30}',sku):
+                    weight=esc(str(config['weights'].get(sku,'')))
+                    line+=f' <label class="item-weight">Grams per item <input type="number" min="1" max="100000" step="1" data-weight-sku="{sku}" value="{weight}"></label>'
+                item_rows.append('<div>'+line+'</div>')
             address=payload.get('address',{})
             delivery=', '.join(str(address.get(k,'')) for k in ('firstName','lastName','address1','city','zip'))
             tracking='; '.join(f"{t['carrier']}: {t['number']}" for t in row['tracking'])
-            rows.append('<tr>'+''.join('<td>'+esc(str(v))+'</td>' for v in
-                (row['source_id'],row['state'],summary,delivery,payload.get('total',''),row['message'],tracking))+'</tr>')
+            cells=[esc(str(v)) for v in (row['source_id'],row['state'],delivery,payload.get('total',''),row['message'],tracking)]
+            cells.insert(2,''.join(item_rows))
+            rows.append('<tr>'+''.join('<td>'+v+'</td>' for v in cells)+'</tr>')
         try: domain=core.get_credentials('shopify').get('shop_domain','')
         except Exception: domain=''
-        boot=json.dumps({'csrf':csrf,'base':base,'instance':instance},ensure_ascii=True).replace('<','\\u003c')
+        boot=json.dumps({'csrf':csrf,'base':base,'instance':instance,'shop_id':config['shop_id']},ensure_ascii=True).replace('<','\\u003c')
         values={k:esc(str(config[k])) for k in ('shop_id','shop_name','target_shop')}
         return HTMLResponse('''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>TikTok order imports</title><style>body{font:16px system-ui;background:#f3f5fa;color:#18213b;margin:24px}main{max-width:1400px;margin:auto}section{background:white;padding:24px;margin:16px 0;border-radius:16px}input,textarea,button{font:inherit;padding:10px;margin:5px}label{display:block}textarea{width:95%;height:80px}button{cursor:pointer;background:#253e80;color:white;border:0;border-radius:7px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:left;padding:12px;border-bottom:1px solid #ddd;vertical-align:top}iframe{width:100%;height:720px;border:0}.scroll{overflow:auto}#status{white-space:pre-wrap}</style></head><body><main>
+        <title>TikTok order imports</title><style>body{font:16px system-ui;background:#f3f5fa;color:#18213b;margin:24px}main{max-width:1400px;margin:auto}section{background:white;padding:24px;margin:16px 0;border-radius:16px}input,textarea,button{font:inherit;padding:10px;margin:5px}label{display:block}textarea{width:95%;height:80px}button{cursor:pointer;background:#253e80;color:white;border:0;border-radius:7px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:left;padding:12px;border-bottom:1px solid #ddd;vertical-align:top}iframe{width:100%;height:720px;border:0}.scroll{overflow:auto}#status{white-space:pre-wrap}.item-weight{display:inline-block;white-space:nowrap}.item-weight input{width:7ch;padding:4px}</style></head><body><main>
         '''+workspace_navigation('orders',base)+'''<h1>TikTok orders → Shopify</h1>
         <p>Order-only beta. Paid, seller-fulfilled orders become physical Shopify orders for postage labels. No catalogue matching.</p>
         <section><h2>Connection and controls</h2><p id="status">'''+esc(config['last_message'])+'''</p><p id="last-success">Last completed scan: not recorded yet.</p>
@@ -238,7 +246,7 @@ def mount_orders(app,core,client_factory):
         <label>Actual item weights in grams: JSON mapping of TikTok SKU ID to weight<textarea id="weights">'''+esc(json.dumps(config['weights'],indent=2))+'''</textarea></label>
         <label>Carrier names: JSON mapping from Shopify carrier to TikTok carrier<textarea id="carriers">'''+esc(json.dumps(config['carriers'],indent=2))+'''</textarea></label>
         <label><input id="enabled" type="checkbox" '''+('checked' if config['enabled'] else '')+'''>Import new orders every five minutes</label>
-        <button onclick="save()">Save settings</button><button onclick="act('scan')">Scan and preview</button><button id="import-now" onclick="act('import')">Import TikTok orders now</button><button onclick="act('browser/start')">Start TikTok browser</button><button onclick="location.reload()">Refresh orders</button><p id="action-status" role="status"></p>
+        <button id="save-settings" onclick="save()">Save settings</button><button onclick="act('scan')">Scan and preview</button><button id="import-now" onclick="act('import')">Import TikTok orders now</button><button onclick="act('browser/start')">Start TikTok browser</button><button onclick="location.reload()">Refresh orders</button><p id="action-status" role="status"></p>
         <p>Start the browser, sign in below, save the verified account and actual weights, then preview before enabling imports. Session expiry pauses imports until you sign in again.</p></section>
         <section><h2>TikTok browser</h2><p>Sign in here on this Home Assistant host. Your browser session stays in the app’s private configuration.</p>
         <iframe title="TikTok sign in" src="'''+esc(base)+'''/orders/desktop/vnc.html?autoconnect=true&amp;reconnect=true&amp;reconnect_delay=3000&amp;resize=scale&amp;path='''+quote(base+'/orders/desktop/websockify?token='+csrf,safe='')+'''"></iframe></section>
@@ -271,6 +279,21 @@ def mount_orders(app,core,client_factory):
         stamp=datetime.now(timezone.utc).isoformat()
         store.configure(**value,settings_saved_at=stamp,preview_verified=old.get('preview_verified',False) and not changed)
         return {'ok':True,'saved_at':stamp}
+
+    @app.post('/orders/weights')
+    async def save_weight(request:Request):
+        value=await request.json()
+        if not isinstance(value,dict) or set(value)!={'shop_id','sku','grams'}:
+            raise HTTPException(400,'Invalid weight update')
+        sku=value['sku']; grams=value['grams']; config=store.settings()
+        if not config['shop_id'] or value['shop_id']!=config['shop_id']:
+            raise HTTPException(409,'Reload the order page before saving weights')
+        if not isinstance(sku,str) or not re.fullmatch(r'[0-9]{5,30}',sku) or type(grams) is not int or not 1<=grams<=100000:
+            raise HTTPException(400,'Enter a whole weight from 1 to 100,000 grams per item')
+        weights={**config['weights'],sku:grams}
+        stamp=datetime.now(timezone.utc).isoformat()
+        store.configure(weights=weights,settings_saved_at=stamp)
+        return {'weights':weights}
 
     @app.post('/orders/scan')
     async def scan():

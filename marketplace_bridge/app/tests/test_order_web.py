@@ -7,6 +7,37 @@ from app.order_web import mount_orders
 from app.security import SecretBox
 
 
+def test_inline_weight_persists_without_disabling_automatic_import(tmp_path,monkeypatch):
+    from app.order_store import OrderStore
+    from app.tests.test_orders import sample
+
+    monkeypatch.setenv('BRIDGE_DEVELOPMENT','1')
+    box=SecretBox.from_file(tmp_path/'key')
+    core=SimpleNamespace(settings=SimpleNamespace(data_dir=tmp_path),secrets=box)
+    app=FastAPI(); mount_orders(app,core,lambda _:None)
+    store=OrderStore(tmp_path/'orders.db',box)
+    order=sample()
+    sku=order.payload()['items'][0]['sku']
+    store.configure(shop_id=order.shop_id,enabled=True,preview_verified=True,weights={'12345':90})
+    store.record(order,'review','Item weight is missing')
+
+    client=TestClient(app)
+    page=client.get('/orders').text
+    headers={'x-order-csrf':re.search(r'"csrf": "([^"]+)"',page)[1]}
+    assert f'data-weight-sku="{sku}" value=""' in page
+    weight={'shop_id':order.shop_id,'sku':sku,'grams':400}
+    assert client.post('/orders/weights',json=weight).status_code==403
+    assert client.post('/orders/weights',headers=headers,json={**weight,'grams':0}).status_code==400
+    assert client.post('/orders/weights',headers=headers,json={**weight,'shop_id':'99999'}).status_code==409
+    response=client.post('/orders/weights',headers=headers,json=weight)
+    assert response.json()=={'weights':{'12345':90,sku:400}}
+    assert f'data-weight-sku="{sku}" value="400"' in client.get('/orders').text
+    config=store.settings()
+    assert config['weights']=={'12345':90,sku:400}
+    assert config['enabled'] and config['preview_verified']
+    assert store.get(order.shop_id,order.order_id)['state']=='review'
+
+
 def test_cancelled_browser_transfer_holds_the_shared_lock_until_worker_finishes(tmp_path,monkeypatch):
     import asyncio
     import threading
